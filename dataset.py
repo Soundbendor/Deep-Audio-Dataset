@@ -4,6 +4,7 @@ import numpy as np
 from sox.core import sox
 
 import os, glob, shutil
+import random, time
 import multiprocessing
 
 
@@ -51,6 +52,9 @@ class AudioDataset:
         self.train = None
         self.validate = None
         self.test = None
+
+        #seed RNG
+        random.seed(time.time())
 
 
     #loads dataset from files into train, test, and val datasets
@@ -116,12 +120,10 @@ class AudioDataset:
         with open(os.path.join(self._dir, self._name)) as f:
             index = [tuple(i.strip().split(",")) for i in f.readlines()]
 
-        print(len(index))
         #see if number of processes are excessive. if so, adjust to appropriate amt
         if np.ceil(len(index)/ex_per_file) < n_processes:
             n_processes = int(np.ceil(len(index)/ex_per_file))
 
-        print(n_processes)
         #offset for consistent output file numbering across processes
         offset = int((len(index)/ex_per_file)/n_processes)+1
 
@@ -129,16 +131,16 @@ class AudioDataset:
         if offset == 0:
             offset = 1
 
-        print(offset)
+        #shuffle the indicies to guarentee randomness across files
+        random.shuffle(index)
+
         #create arguments to pass to subtasks
         subarrays = np.array_split(index, n_processes)
         for i, x in enumerate(subarrays):
-            print(x.shape)
             if i == 0:
                 subarrays[i] = (x, ex_per_file, offset*i, True)
             else:
                 subarrays[i] = (x, ex_per_file, offset*i, False)
-            print(offset*i)
 
         #spawn multiproccesses
         processes = []
@@ -187,7 +189,7 @@ class AudioDataset:
 
         #split into sections to feed into LSTM
         #zero pad values so split works
-        d = [tf.pad(x, [[0, input_length % input_size]]) for _, x in features.items()]
+        d = [tf.pad(x, [[0, input_size - (input_length % input_size)]]) for _, x in features.items()]
         d = [tf.reshape(j, [-1, input_size]) for j in d]
 
         return d
@@ -252,3 +254,101 @@ class AudioDataset:
             os.remove(os.path.join(self._dir, self._name))
         except OSError as e:
             print("Error: {0} - {1}".format(e.filename, e.strerror))
+
+
+
+class PianoDataset(AudioDataset):
+    def __init__(self, directory, name, size, batch_size, train_split=0.7, val_split=0.15, test_split=0.15):
+        super().__init__(directory, name, size, batch_size, train_split, val_split, test_split)
+
+
+    #generate an audio dataset & its associated tfrecords
+    def generate(self, remove_wav=False, ex_per_file=2400, n_processes=multiprocessing.cpu_count()):
+        #check if dataset has already been created. if so, do not generate again
+        if not self._get_records():        #_get_records() returns a list of records. not [] == True when list is empty
+            self._generate_index()
+            self.generate_records(ex_per_file=ex_per_file, n_processes=n_processes)
+            if remove_wav:
+                self._remove_wav()
+                pass
+
+
+    #loads dataset from files into train, test, and val datasets
+    def load(self, input_size, shuffle_buffer=1024):
+        #load serialized dataset from files, then deserialize
+        raw_ds = tf.data.TFRecordDataset(self._get_records())
+        proc_ds = raw_ds.map(lambda x: self._load_map(x, input_size)).shuffle(buffer_size=shuffle_buffer)
+
+        #create train/val/test datasets from loaded main ds
+        #self.train = proc_ds.take(self._train_size).repeat().padded_batch(self._batch_size, padded_shapes=([None, input_size],[None, input_size])).prefetch(tf.data.experimental.AUTOTUNE)
+        self.train = proc_ds.take(self._train_size).repeat().batch(self._batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+        self.test = proc_ds.skip(self._train_size)
+        self.validate = self.test.skip(self._val_size).repeat().batch(self._batch_size)
+        self.test = self.test.take(self._test_size).repeat().batch(self._batch_size)
+
+
+    def _generate_index(self):
+        target_file = open(os.path.join(self._dir, self._name), "w")
+
+        self._make_dirs()
+
+        #only get file names
+        files = [_ for _ in os.walk(os.path.join(self._dir, "in"))][0][-1]
+        for file in files:
+            #resample to 16kHz and place resampled in out dir
+            sox("sox {0} {1} rate 16000".format(os.path.join(self._dir, "in", file), os.path.join(self._dir, "out", file)).split())
+            #copy each resampled file and overwrite the high sample rate file
+            shutil.copy(os.path.join(self._dir, "out", file), os.path.join(self._dir, "in", file))
+
+            #find the frequencies as numbers in the file name. most of these will be '##.' if so remove '.'
+            note = file[12:15]
+            if note[-1] == '.':
+                note = note[:-1]
+
+            #this means output freq isn't in dataset
+            if int(note) > 96:
+                continue
+
+            #octaves are 12 semitones apart. thus have output be 12 higher
+            print(file[:12] + "{0}.wav,".format(int(note)) + file[:12] + "{0}.wav".format(int(note)+12), file=target_file)
+
+        target_file.close()
+
+
+    #load and read dataset (to be mapped)
+    def _load_map(self, proto_buff, input_size):
+        #convert from serialized to binary
+        feats = {"a_in": tf.io.FixedLenFeature([], tf.string),
+                 "a_out": tf.io.FixedLenFeature([], tf.string)}
+        features = tf.io.parse_single_example(proto_buff, features=feats)
+
+        #convert from binary to floats
+        features["a_in"] = tf.io.decode_raw(features["a_in"], tf.float16)
+        features["a_out"] = tf.io.decode_raw(features["a_out"], tf.float16)
+
+        #split into sections to feed into LSTM
+        #zero pad values so split works
+        d = [x for _, x in features.items()]
+        #pad each audio file to the length of the longest audio file
+        #pad by len(longest) - len(this_file). Must ensure longest is a mult of input_size though
+        d = [tf.pad(x, [[0, tf.reduce_max([tf.shape(d[0]), tf.shape(d[1])]) + (input_size - (tf.reduce_max([tf.shape(d[0]), tf.shape(d[1])]) % input_size)) - tf.shape(x)[0]]]) for x in d]
+        d = [tf.reshape(x, [-1, input_size]) for x in d]
+
+        return d
+
+
+    #make directories for audio generation
+    def _make_dirs(self):
+        #if ./_dir/ doesn't exist, make it and all others
+        if not os.path.exists(os.path.join(self._dir, "out")):
+            try:
+                os.makedirs(os.path.join(self._dir, "out"))
+            except OSError as e:
+                raise
+        #if ./_dir/ exists, but in and out don't (ie if remove_wav=True on previous gen)
+        elif not (os.path.exists(os.path.join(self._dir, "in")) or os.path.exists(os.path.join(self._dir, "out"))):
+            try:
+                os.makedirs(os.path.join(self._dir, "in"))
+                os.makedirs(os.path.join(self._dir, "out"))
+            except OSError as e:
+                raise
