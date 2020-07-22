@@ -3,9 +3,9 @@
 
 #### Requirements
 * Python 3
-* Tensorflow 2.0+
+* Tensorflow 2.2+
 * Numpy
-* Sox (the program, and python package 'pip install sox')
+* Sox (the program, and python package 'pip install pysox')
 
 #### Example usage
 
@@ -20,6 +20,8 @@ input_length = 16000*1                          #sample rate * length (sec), use
 batch_size=64                                   #used for data loading
 
 #dataset params
+dataset_directory = "./data"
+dataset_name = "dataset"
 input_lower = 100                               #lowest frequency for dataset generation
 input_upper = 1000                              #highest frequency for dataset generation
 n_steps = 1000                                  #used for dataset generation
@@ -32,13 +34,13 @@ Create dataset object and generate data
 
 ```python
 if __name__ == "__main__":
-    dataset = AudioDataset("./data", "dataset", dataset_size, batch_size, train_split=0.7, val_split=0.15, test_split=0.15)
+    dataset = AudioDataset(dataset_directory, dataset_name)
 
     #Generate dataset if it doesn't already exist
-    dataset.generate(input_lower, input_upper, n_steps, length, remove_wav=False)
+    dataset.generate(input_lower, input_upper, n_steps)
 
     #Load the dataset so we can use them
-    dataset.load(input_size, input_length)
+    dataset.load(input_size, input_length, train_split=0.7, val_split=0.15, test_split=0.15)
 ```
 
 Various parameters can be accessed as class members
@@ -77,6 +79,29 @@ sin4980_48.wav,sin9960_96.wav
 sin4961_03.wav,sin9922_06.wav
 ```
 Then, call `dataset.generate_records(ex_per_file=ex_per_file, n_processes=n_processes)`. Default arguments should work. `n_processes` is how many processes should it run simultaneously to create the tfrecord files faster. Default is the number of availible CPU cores. `ex_per_file` allows you to control how many (X, Y) pairs there should be per tfrecord file. This number should be set so the files are between 150 and 200 MB. Default of 2400 should equate to this if your audio is 16 bit, 16kHz, and 1 sec in length. ( (n_bit/8) * n_samples * 2 * ex_per_file).
+
+
+#### Audio Classification Datasets
+Often, you don't need audio input and audio output. I have provided two dataset classes to handle tasks in which you take audio as an input, and predict discrete labels as an output. `SimpleAudioClassificationDataset` allows you to predict classes based off the entire audio file. This may be useful in genre classification for example. In the dataset file (`./data/dataset`) you would list the audio file first, and then the applicable classes in csv format. The corresponding audio files would still be placed in `./data/in/`. For instance, with four potential output classes:
+```
+audio1.wav,0,0,0,1
+audio2.wav,1,0,1,0
+audio3.wav,0,1,0,0
+```
+
+If you have a more complicated classification problem, there is `AudioClassificationDataset`. This allows you to provide a csv file associated with each input audio file which allows you to correlate classes with small chunks of audio. This is useful for trying to predict MIDI notes from an input song. To create a dataset using this class, structure your dataset file like this:
+```
+song1.wav,song1_key.csv
+song2.wav,song2_key.csv
+song3.wav,song3_key.csv
+```
+Where each csv files is structured like this:
+```
+TIME STAMP, FEATURE 1, ... , FEATURE N
+0,0,...,0
+1,1,...,0
+2,0,...,1
+```
 
 #### Things to note
 * Code using dataset generation must be wrapped in a `if __name__ == "__main__"` block due to the use of multithreading.
