@@ -1,4 +1,4 @@
-#paritally based on pytorch code by Alexander Corley
+# paritally based on pytorch code by Alexander Corley
 import tensorflow as tf
 import numpy as np
 from sox.core import sox
