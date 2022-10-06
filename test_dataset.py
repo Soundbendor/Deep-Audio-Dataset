@@ -1,2 +1,2 @@
 def test_import():
-    from dataset import AudioDataset
+    from deep_audio_dataset import AudioDataset
