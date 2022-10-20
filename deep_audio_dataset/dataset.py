@@ -163,6 +163,8 @@ class AudioDataset:
         #wait for processes to complete
         for i in processes:
             i.join()
+            if i.exitcode != 0:
+                raise Exception(f"Subprocess in generate_records returned a non-zero exit code ({i.exitcode}), check output for additional information.")
 
 
     #write some information about dataset to json for future loading/human reading
