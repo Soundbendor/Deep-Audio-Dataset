@@ -1,12 +1,16 @@
 #paritally based on pytorch code by Alexander Corley
-import tensorflow as tf
+import csv
+import glob
+import json
+import multiprocessing
+import os
+import random
+import shutil
+import time
+
 import numpy as np
 from sox.core import sox
-
-import os, glob, shutil
-import random, time
-import json, csv
-import multiprocessing
+import tensorflow as tf
 
 
 '''
