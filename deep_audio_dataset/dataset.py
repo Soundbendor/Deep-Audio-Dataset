@@ -1,5 +1,5 @@
 #paritally based on pytorch code by Alexander Corley
-from abc import ABC
+from abc import ABC, abstractmethod
 import csv
 import glob
 import json
@@ -48,6 +48,10 @@ class BaseAudioDataset(ABC):
             self._rng = random.Random(time.time())
         else:
             self._rng = random.Random(seed)
+    
+    @abstractmethod
+    def generate(self, *args, **kwargs) -> None:
+        pass
 
 
 class AudioDataset(BaseAudioDataset):
@@ -76,67 +80,7 @@ class AudioDataset(BaseAudioDataset):
 
 
     #generate an audio dataset & its associated tfrecords
-    def generate(self, input_lower, input_upper, n_steps, length=1, sample_rate=16000, dialation=2,
-                 waves=["sin", "square", "saw", "triangle"], vol=0.1, remove_wav=True, ex_per_file=2400,
-                 mods=["pure", "oct", "per5", "per4", "maj3", "maj6", "maj2", "maj7",
-                       "maj", "min", "dim", "aug", "maj7", "majmin7", "min7"],
-                 n_processes=multiprocessing.cpu_count()):
-
-        #check if dataset has already been created. if so, do not generate again
-        if not self._get_records():        #_get_records() returns a list of records. not [] == True when list is empty
-            self._write_params(input_lower, input_upper, n_steps, length, sample_rate, waves, mods) #save info about dataset to file so it's easier to load
-            self.generate_audio(input_lower, input_upper, n_steps, length, sample_rate=sample_rate, dialation=dialation, waves=waves, vol=vol, mods=mods, n_processes=n_processes) #generate synthetic audio
-            self.generate_records(ex_per_file=ex_per_file, n_processes=n_processes)         #generate tfrecord files from generated audio
-            if remove_wav:
-                self._remove_wav()
-
-
-    #generate audio for a dataset, to be converted to tfrecords
-    def generate_audio(self, input_lower, input_upper, n_steps, length, sample_rate=16000,
-                       dialation=2, waves=["sin", "square", "saw", "triangle"], vol=0.1,
-                       mods=["pure", "oct", "per5", "per4", "maj3", "maj6", "maj2", "maj7",
-                             "maj", "min", "dim", "aug", "maj7", "majmin7", "min7"],
-                       n_processes=multiprocessing.cpu_count()):
-        #make directories to store wav files
-        self._make_dirs()
-
-        #reference dict that yields ratios for given combinations/chords
-        polyphony_dict = {"pure" : (), "oct" : (2,), "per5" : (3/2,), "per4" : (4/3,), "maj3" : (5/4,),
-                          "maj6" : (5/3,), "maj2" : (9/8,), "maj7" : (15/8,), "maj" : (5/4, 3/2),
-                          "min" : (6/5, 3/2), "dim" : (6/5, 11/8), "aug" : (5/4, 128/81),
-                          "maj7" : (5/4, 3/2, 15/8), "majmin7" : (5/4, 3/2, 16/9), "min7" : (6/5, 3/2, 16/9)}
-
-        #create list of notes to generate
-        notes = []
-        index_file = open(os.path.join(self._dir, self._name), "w")
-        for wave in waves:
-            for mod in mods:
-                for freq in self._generate_fundamental_range(input_lower, input_upper, n_steps):
-                    #generate file names
-                    in_file = self._generate_note_name(wave, freq, mod)
-                    out_file = self._generate_note_name(wave, dialation*freq, mod)
-
-                    #generate waves & freqs for sox gneration
-                    in_sin = self._generate_note(wave, freq, polyphony_dict[mod])
-                    out_sin = self._generate_note(wave, dialation*freq, polyphony_dict[mod])
-
-                    #add in and out notes to queue to be generated
-                    notes.append("sox -n -b 16 {0}/{1} rate {2} synth {3} {4} vol {5} remix - ".format(
-                              os.path.join(self._dir, "in"), in_file, sample_rate, length, in_sin, vol).split())
-                    notes.append("sox -n -b 16 {0}/{1} rate {2} synth {3} {4} vol {5} remix -".format(
-                              os.path.join(self._dir, "out"), out_file, sample_rate, length, out_sin, vol).split())
-
-                    #write to data index file (for tfrecord generation)
-                    print("{},{}".format(in_file, out_file), file=index_file)
-
-        #generate data
-        index_file.close()
-        p = multiprocessing.Pool(n_processes)
-        p.map(sox, notes)
-
-
-    #generate tfrecord files from a set of WAV files. Target size ~=150MB each.
-    def generate_records(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()):
+    def generate(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()) -> None:
         #generate on CPU only. If flag isn't set false, GPU likely will OOM
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
@@ -238,28 +182,6 @@ class AudioDataset(BaseAudioDataset):
         if isinstance(value, type(tf.constant(0))):
             value = value.numpy() # BytesList won't unpack a string from an EagerTensor.
         return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
-
-
-    #generate notes that are exponentially separated in distance
-    #this ensures that each range that we "hear" has the same ammt of data
-    def _generate_fundamental_range(self, upper, lower, steps):
-        steps -= 1
-        base = (upper / lower) ** (1 / steps)
-        return [lower * (base ** i) for i in range(steps + 1)]
-
-
-    #generates notes in a way that allows for intervals, chords, beyond
-    def _generate_note(self, wave, f0, mods):
-        note = "{0} {1}".format(wave, f0)
-        for mult in mods:
-            note += ' ' + wave + ' ' + str(mult * f0)
-        return note
-
-
-    #generates the proper name of a note
-    #EX: input: wave=sin, f=100.431, mod_name=maj5 output: sin_maj5_100_43.wav
-    def _generate_note_name(self, wave, f0, mod_name):
-        return "{0}_{1}_{2:.2f}".format(wave, mod_name, f0).replace(".", "_") + ".wav"
 
 
     #return all tfrecord files matching pattern dir/name#.tfrecord
