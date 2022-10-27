@@ -1,4 +1,5 @@
 #paritally based on pytorch code by Alexander Corley
+from abc import ABC
 import csv
 import glob
 import json
@@ -7,6 +8,7 @@ import os
 import random
 import shutil
 import time
+from typing import Any, Optional
 
 import numpy as np
 from sox.core import sox
@@ -35,19 +37,26 @@ dataset.test
 '''
 
 
-class AudioDataset:
-    def __init__(self, directory, name):
-        #store args as class members
-        self._dir = directory
-        self._name = name
-
-        #create placeholders for datasets
+class BaseAudioDataset(ABC):
+    def __init__(self, seed: Optional[Any] = None):
+        # create placeholders for datasets
         self.train = None
         self.validate = None
         self.test = None
 
-        #seed RNG
-        random.seed(time.time())
+        if seed is None:
+            self._rng = random.Random(time.time())
+        else:
+            self._rng = random.Random(seed)
+
+
+class AudioDataset(BaseAudioDataset):
+    def __init__(self, directory, name, seed: Optional[Any] = None):
+        super().__init__(seed)
+
+        #store args as class members
+        self._dir = directory
+        self._name = name
 
 
     #loads dataset from files into train, test, and val datasets
@@ -147,7 +156,7 @@ class AudioDataset:
             offset = 1
 
         #shuffle the indicies to guarentee randomness across files
-        random.shuffle(index)
+        self._rng.shuffle(index)
 
         #create arguments to pass to subtasks
         subarrays = np.array_split(index, n_processes)
@@ -397,7 +406,7 @@ class SimpleAudioClassificationDataset(AudioDataset):
             offset = 1
 
         #shuffle the indicies to guarentee randomness across files
-        random.shuffle(index)
+        self._rng.shuffle(index)
 
         #create arguments to pass to subtasks
         subarrays = np.array_split(index, n_processes)
@@ -521,7 +530,7 @@ class AudioClassificationDataset(AudioDataset):
             offset = 1
 
         #shuffle the indicies to guarentee randomness across files
-        random.shuffle(index)
+        self._rng.shuffle(index)
 
         #create arguments to pass to subtasks
         subarrays = np.array_split(index, n_processes)
