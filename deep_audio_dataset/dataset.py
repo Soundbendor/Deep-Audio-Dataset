@@ -5,10 +5,18 @@ import glob
 import json
 import multiprocessing
 import os
+from pathlib import Path
 import random
 import shutil
 import time
-from typing import Any, Optional
+from typing import (
+    Any,
+    List,
+    Mapping,
+    Optional,
+    Union,
+)
+import wave
 
 import numpy as np
 from sox.core import sox
@@ -52,7 +60,37 @@ class BaseAudioDataset(ABC):
     @abstractmethod
     def generate(self, *args, **kwargs) -> None:
         pass
+    
+    def _analyze_files(self, files: List[Union[str, Path]]) -> Mapping[str, Any]:
+        analysis = {
+            "sampling_rates": set(),
+            "lengths": set(),
+            "bits_per_sample": set(),
+            "number_of_channels": set(),
+            "all_exist": True,
+            "do_not_exist": [],
+        }
 
+        for file in files:
+            file = Path(file)
+            if file.exists():
+                with open(file, "rb") as f:
+                    wav_file = wave.open(f)
+                    sampling_rate = wav_file.getframerate()
+                    bits_per_sample = wav_file.getsampwidth() * 8
+                    number_of_channels = wav_file.getnchannels()
+                    length = wav_file.getnframes() / sampling_rate
+
+                    analysis["sampling_rates"].add(sampling_rate)
+                    analysis["bits_per_sample"].add(bits_per_sample)
+                    analysis["number_of_channels"].add(number_of_channels)
+                    analysis["lengths"].add(length)
+
+            else:
+                analysis["all_exist"] = False
+                analysis["do_not_exist"].append(str(file))
+        
+        return analysis
 
 class AudioDataset(BaseAudioDataset):
     def __init__(self, directory, name, seed: Optional[Any] = None):
@@ -87,6 +125,20 @@ class AudioDataset(BaseAudioDataset):
         #get list of all audio files from index file
         with open(os.path.join(self._dir, self._name)) as f:
             index = [tuple(i.strip().split(",")) for i in f.readlines()]
+        
+        input_file_paths = [Path(self._dir).joinpath("in/" + f) for i in index for f in i if len(f) > 0]
+        input_file_analysis = self._analyze_files(input_file_paths)
+        
+        if not input_file_analysis["all_exist"]:
+            raise ValueError(f"The following files do not exist: {', '.join(input_file_analysis['do_not_exist'])}")
+        if len(input_file_analysis["sampling_rates"]) > 1:
+            raise ValueError(f"Multiple sampling rates detected: {input_file_analysis['sampling_rates']}")
+        if len(input_file_analysis["bits_per_sample"]) > 1:
+            raise ValueError(f"Multiple bits per sample detected: {input_file_analysis['bits_per_sample']}")
+        if len(input_file_analysis["number_of_channels"]) > 1:
+            raise ValueError(f"Multiple number of channels detected: {input_file_analysis['number_of_channels']}")
+        if len(input_file_analysis["lengths"]) > 1:
+            raise ValueError(f"Multiple lengths detected (seconds): {input_file_analysis['lengths']}")
 
         #see if number of processes are excessive. if so, adjust to appropriate amt
         if np.ceil(len(index)/ex_per_file) < n_processes:
