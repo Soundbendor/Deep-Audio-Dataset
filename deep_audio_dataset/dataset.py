@@ -91,6 +91,30 @@ class BaseAudioDataset(ABC):
                 analysis["do_not_exist"].append(str(file))
         
         return analysis
+    
+    def _validate_audio_file_set(self, file_paths: List[Union[str, Path]]) -> None:
+        """Validate that all of the wav files have consistent properties.
+
+        Args:
+            file_paths (list): List of file paths (as strings or Path objects) for each of the files in the set to validate.
+
+        Raises:
+            ValueError: If one of the files does not exist or if multiple, sampling rates, bits per sample, number of channels, or lengths are detected.
+        """
+        file_analysis = self._analyze_files(file_paths)
+        
+        if not file_analysis["all_exist"]:
+            raise ValueError(f"The following files do not exist: {', '.join(file_analysis['do_not_exist'])}")
+        if len(file_analysis["sampling_rates"]) > 1:
+            raise ValueError(f"Multiple sampling rates detected: {file_analysis['sampling_rates']}")
+        if len(file_analysis["bits_per_sample"]) > 1:
+            raise ValueError(f"Multiple bits per sample detected: {file_analysis['bits_per_sample']}")
+        if len(file_analysis["number_of_channels"]) > 1:
+            raise ValueError(f"Multiple number of channels detected: {file_analysis['number_of_channels']}")
+        if len(file_analysis["lengths"]) > 1:
+            raise ValueError(f"Multiple lengths detected (seconds): {file_analysis['lengths']}")
+        
+        return
 
 class AudioDataset(BaseAudioDataset):
     def __init__(self, directory, name, seed: Optional[Any] = None):
@@ -127,18 +151,8 @@ class AudioDataset(BaseAudioDataset):
             index = [tuple(i.strip().split(",")) for i in f.readlines()]
         
         input_file_paths = [Path(self._dir).joinpath("in/" + f) for i in index for f in i if len(f) > 0]
-        input_file_analysis = self._analyze_files(input_file_paths)
-        
-        if not input_file_analysis["all_exist"]:
-            raise ValueError(f"The following files do not exist: {', '.join(input_file_analysis['do_not_exist'])}")
-        if len(input_file_analysis["sampling_rates"]) > 1:
-            raise ValueError(f"Multiple sampling rates detected: {input_file_analysis['sampling_rates']}")
-        if len(input_file_analysis["bits_per_sample"]) > 1:
-            raise ValueError(f"Multiple bits per sample detected: {input_file_analysis['bits_per_sample']}")
-        if len(input_file_analysis["number_of_channels"]) > 1:
-            raise ValueError(f"Multiple number of channels detected: {input_file_analysis['number_of_channels']}")
-        if len(input_file_analysis["lengths"]) > 1:
-            raise ValueError(f"Multiple lengths detected (seconds): {input_file_analysis['lengths']}")
+
+        self._validate_audio_file_set(input_file_paths)
 
         #see if number of processes are excessive. if so, adjust to appropriate amt
         if np.ceil(len(index)/ex_per_file) < n_processes:
