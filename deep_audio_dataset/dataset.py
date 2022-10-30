@@ -99,20 +99,24 @@ class BaseAudioDataset(ABC):
             file_paths (list): List of file paths (as strings or Path objects) for each of the files in the set to validate.
 
         Raises:
-            ValueError: If one of the files does not exist or if multiple, sampling rates, bits per sample, number of channels, or lengths are detected.
+            ValueError: If one of the files does not exist or if multiple sampling rates, bits per sample, number of channels, or lengths are detected.
         """
         file_analysis = self._analyze_files(file_paths)
         
         if not file_analysis["all_exist"]:
-            raise ValueError(f"The following files do not exist: {', '.join(file_analysis['do_not_exist'])}")
+            raise ValueError(f"The following files do not exist: {', '.join(sorted(file_analysis['do_not_exist']))}")
         if len(file_analysis["sampling_rates"]) > 1:
-            raise ValueError(f"Multiple sampling rates detected: {file_analysis['sampling_rates']}")
+            sampling_rates = ", ".join([str(x) for x in sorted(file_analysis["sampling_rates"])])
+            raise ValueError(f"Multiple sampling rates detected: {sampling_rates}")
         if len(file_analysis["bits_per_sample"]) > 1:
-            raise ValueError(f"Multiple bits per sample detected: {file_analysis['bits_per_sample']}")
+            bits_per_sample = ", ".join([str(x) for x in sorted(file_analysis["bits_per_sample"])])
+            raise ValueError(f"Multiple bits per sample detected: {bits_per_sample}")
         if len(file_analysis["number_of_channels"]) > 1:
-            raise ValueError(f"Multiple number of channels detected: {file_analysis['number_of_channels']}")
+            number_of_channels = ", ".join([str(x) for x in sorted(file_analysis["number_of_channels"])])
+            raise ValueError(f"Multiple number of channels detected: {number_of_channels}")
         if len(file_analysis["lengths"]) > 1:
-            raise ValueError(f"Multiple lengths detected (seconds): {file_analysis['lengths']}")
+            lengths = ", ".join([str(x) for x in sorted(file_analysis["lengths"])])
+            raise ValueError(f"Multiple lengths detected (seconds): {lengths}")
         
         return
 

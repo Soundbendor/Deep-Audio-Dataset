@@ -135,7 +135,7 @@ def test_audio_dataset_fail_different_lengths():
     with pytest.raises(ValueError) as e:
         ad.generate()
     
-    assert(str(e.value) == "Multiple lengths detected (seconds): {1.0, 2.0}")
+    assert(str(e.value) == "Multiple lengths detected (seconds): 1.0, 2.0")
 
     os.remove("test_data/in/test0.wav")
     os.remove("test_data/in/test1.wav")
@@ -190,7 +190,7 @@ def test_audio_dataset_fail_multiple_sampling_rates():
     with pytest.raises(ValueError) as e:
         ad.generate()
     
-    assert(str(e.value) == "Multiple sampling rates detected: {88200, 44100}")
+    assert(str(e.value) == "Multiple sampling rates detected: 44100, 88200")
 
     os.remove("test_data/in/test0.wav")
     os.remove("test_data/in/test1.wav")
@@ -220,7 +220,7 @@ def test_audio_dataset_fail_bits_per_sample():
     with pytest.raises(ValueError) as e:
         ad.generate()
     
-    assert(str(e.value) == "Multiple bits per sample detected: {16, 32}")
+    assert(str(e.value) == "Multiple bits per sample detected: 16, 32")
 
     os.remove("test_data/in/test0.wav")
     os.remove("test_data/in/test1.wav")
@@ -250,7 +250,7 @@ def test_audio_dataset_fail_multiple_channels():
     with pytest.raises(ValueError) as e:
         ad.generate()
     
-    assert(str(e.value) == "Multiple number of channels detected: {1, 2}")
+    assert(str(e.value) == "Multiple number of channels detected: 1, 2")
 
     os.remove("test_data/in/test0.wav")
     os.remove("test_data/in/test1.wav")
