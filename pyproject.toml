@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deep_audio_dataset"
+version = "0.1"
+authors = [
+  { name="Patrick Donnelly", email="Patrick.Donnelly@oregonstate.edu" },
+  { name="Doug Dennis", email="douglasdennisjr@gmail.com" },
+]
+description = "Audio dataset management for deep learning."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Soundbendor/Deep-Audio-Dataset"
+"Bug Tracker" = "https://github.com/Soundbendor/Deep-Audio-Dataset/issues"
