@@ -81,10 +81,10 @@ def wav_files():
     shutil.rmtree("test_data")
 
 
-def test_audio_dataset_generate_records(wav_files):
+def test_audio_dataset_generate(wav_files):
     from deep_audio_dataset import AudioDataset
     ad = AudioDataset("test_data", "test.txt")
-    ad.generate_records()
+    ad.generate()
 
     assert(Path("test_data/test.txt0.tfrecord").exists())
 
