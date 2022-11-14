@@ -11,6 +11,7 @@ import shutil
 import time
 from typing import (
     Any,
+    Iterable,
     List,
     Mapping,
     Optional,
@@ -56,11 +57,11 @@ class BaseAudioDataset(ABC):
             self._rng = random.Random(time.time())
         else:
             self._rng = random.Random(seed)
-    
+
     @abstractmethod
     def generate(self, *args, **kwargs) -> None:
         pass
-    
+
     def _analyze_files(self, files: List[Union[str, Path]]) -> Mapping[str, Any]:
         analysis = {
             "sampling_rates": set(),
@@ -89,9 +90,9 @@ class BaseAudioDataset(ABC):
             else:
                 analysis["all_exist"] = False
                 analysis["do_not_exist"].append(str(file))
-        
+
         return analysis
-    
+
     def _validate_audio_file_set(self, file_paths: List[Union[str, Path]]) -> None:
         """Validate that all of the wav files have consistent properties.
 
@@ -102,7 +103,7 @@ class BaseAudioDataset(ABC):
             ValueError: If one of the files does not exist or if multiple sampling rates, bits per sample, number of channels, or lengths are detected.
         """
         file_analysis = self._analyze_files(file_paths)
-        
+
         if not file_analysis["all_exist"]:
             raise ValueError(f"The following files do not exist: {', '.join(sorted(file_analysis['do_not_exist']))}")
         if len(file_analysis["sampling_rates"]) > 1:
@@ -117,16 +118,22 @@ class BaseAudioDataset(ABC):
         if len(file_analysis["lengths"]) > 1:
             lengths = ", ".join([str(x) for x in sorted(file_analysis["lengths"])])
             raise ValueError(f"Multiple lengths detected (seconds): {lengths}")
-        
+
         return
 
 class AudioDataset(BaseAudioDataset):
-    def __init__(self, directory, name, seed: Optional[Any] = None):
+    def __init__(self, directory, index_file: str, seed: Optional[Any] = None):
+        """
+
+        Args:
+            directory:
+            index_file (str): Name of the data index file.
+        """
         super().__init__(seed)
 
         #store args as class members
         self._dir = directory
-        self._name = name
+        self._name = index_file
 
 
     #loads dataset from files into train, test, and val datasets
@@ -153,7 +160,7 @@ class AudioDataset(BaseAudioDataset):
         #get list of all audio files from index file
         with open(os.path.join(self._dir, self._name)) as f:
             index = [tuple(i.strip().split(",")) for i in f.readlines()]
-        
+
         input_file_paths = [Path(self._dir).joinpath("in/" + f) for i in index for f in i if len(f) > 0]
 
         self._validate_audio_file_set(input_file_paths)
@@ -297,8 +304,21 @@ class AudioDataset(BaseAudioDataset):
                 raise
 
 
-    #job for multiprocessed generation of tfrecords
-    def _record_generation_job(self, index, ex_per_file, offset, progress=False):
+    def _record_generation_job(
+        self,
+        index: Iterable[List[str]],
+        ex_per_file: int,
+        offset: int,
+        progress=False
+    ) -> None:
+        """Job for multiprocessed generation of tfrecords.
+
+        Args:
+            index (iterable(list(str))): Iterable of index lists. Each element is a list of strings from the index configuration that represent an index configuration for a single example.
+            ex_per_file (int): Number of examples to put in a single tfrecord file.
+            offset (int): Initial offset to use for identifying tfrecord files.
+            progress (bool): Whether or not to print the progress bar. Defaults to False.
+        """
         #create first file to write to
         writer = tf.io.TFRecordWriter(os.path.join(self._dir, "{0}{1}.tfrecord".format(self._name, offset)))
 
@@ -310,15 +330,13 @@ class AudioDataset(BaseAudioDataset):
                 writer.close()
                 writer = tf.io.TFRecordWriter(os.path.join(self._dir, "{0}{1}.tfrecord".format(self._name, int(i/ex_per_file)+offset)))
 
-            #open WAV files and convert to float arrays
-            file_x, file_y = os.path.join(self._dir, "in", files[0]), os.path.join(self._dir, "out", files[1]) #get file paths
-            x, _, y, _ = *tf.audio.decode_wav(tf.io.read_file(file_x)), *tf.audio.decode_wav(tf.io.read_file(file_y))
-            d = [x, y]
-            d = [tf.squeeze(j) for j in d]    #reshape x, y from [t, 1] to [t]
+            input_file_path = os.path.join(self._dir, "in", files[0])
+            output_file_path = os.path.join(self._dir, "out", files[1])
 
-            #tensorflow can only store float32, but WAV files are 16bit. use np methods to store as 16bit
-            feature = {"a_in": self._bytes_feature(np.asarray(d[0]).astype(np.float16).tobytes()),
-                       "a_out": self._bytes_feature(np.asarray(d[1]).astype(np.float16).tobytes())}
+            feature = {
+                "a_in": self._load_audio_feature(input_file_path),
+                "a_out": self._load_audio_feature(output_file_path)
+            }
 
             #create TF example for proper serialization
             example = tf.train.Example(features=tf.train.Features(feature=feature))
@@ -327,6 +345,15 @@ class AudioDataset(BaseAudioDataset):
             #update progress
             if progress:
                 print("Creating TFRecords... {:.1f}%".format(100*i/len(index)), end="\r")
+
+    def _load_audio_feature(self, file_path: str) -> tf.train.Feature:
+        data, _ = tf.audio.decode_wav(tf.io.read_file(file_path))
+
+        #reshape x, y from [t, 1] to [t]
+        data = tf.squeeze(data)
+
+        #tensorflow can only store float32, but WAV files are 16bit. use np methods to store as 16bit
+        return self._bytes_feature(np.asarray(data).astype(np.float16).tobytes())
 
 
     #the opposite of generate_audio(), removes all wav files after generation for storage reasons
