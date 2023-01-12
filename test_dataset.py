@@ -12,7 +12,7 @@ from deep_audio_dataset import AudioDataset
 def generate_sin_wav(frequency: int, total_seconds: int, samples_per_second: int = 44100, bits_per_sample: int = 16):
     values = np.linspace(0.0, total_seconds, samples_per_second * total_seconds)
     values = values * 2 * np.pi * frequency
-    values = np.sin(values)
+    values = np.sin(values) * 32766
 
     if bits_per_sample == 16:
         bps_dtype = np.float16
@@ -50,10 +50,11 @@ def generate_wav_data(
     fmt_chunk_bytes_per_second = (bytes_per_sample * sampling_rate).to_bytes(4, "little")
     fmt_chunk_block_align = bytes.fromhex("02 00")
     fmt_chunk_bits_per_sample = bits_per_sample.to_bytes(2, "little")
-    
+
     data_chunk_tag = bytes.fromhex("64 61 74 61")  # DATA
     data_chunk_size = (data_length_samples * bytes_per_sample).to_bytes(4, "little")
-    data = generate_sin_wav(frequency, data_length_seconds, samples_per_second=sampling_rate, bits_per_sample=bits_per_sample).tobytes()
+    # data = generate_sin_wav(frequency, data_length_seconds, samples_per_second=sampling_rate, bits_per_sample=bits_per_sample).tobytes()
+    data = np.array([frequency] * (sampling_rate * data_length_seconds)).astype(np.float16).tobytes()
 
     riff_chunk = riff_chunk_tag + riff_chunk_size
     wave_chunk = wave_chunk_tag
@@ -68,26 +69,27 @@ def wav_files():
     # FIXME should use pytests built in tmp directory fixture
     files = []
 
-    os.makedirs("test_data/in", exist_ok=True)
-    os.makedirs("test_data/out", exist_ok=True)
+    os.makedirs("test_data/in", exist_ok=False)
+    os.makedirs("test_data/out", exist_ok=False)
 
     for i in range(2):
         filename = f"test_data/in/test{i}.wav"
+        # freq = 440 * (i + 1)
+        freq = 0.0
         with open(filename, "wb") as file:
-            data = generate_wav_data(10)
+            data = generate_wav_data(10, freq)
             file.write(data)
         files.append(filename)
 
         filename = f"test_data/out/test{i}.wav"
         with open(filename, "wb") as file:
-            data = generate_wav_data(10)
+            data = generate_wav_data(10, freq)
             file.write(data)
         files.append(filename)
 
-    
+
     with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
+        f.writelines(["test0.wav,test0.wav\n", "test1.wav,test1.wav"])
         files.append("test_data/test.txt")
 
     yield files
@@ -101,27 +103,40 @@ def wav_files():
 def test_audio_dataset_generate(wav_files):
     from deep_audio_dataset import AudioDataset
     ad = AudioDataset("test_data", "test.txt")
-    ad.generate()
+    ad.generate(ex_per_file=1)
 
     assert(Path("test_data/test.txt0.tfrecord").exists())
+    assert(Path("test_data/test.txt1.tfrecord").exists())
+
+    checksums = set()
 
     with open("test_data/test.txt0.tfrecord", "rb") as f:
-        checksum = md5(f.read()).hexdigest()
+        checksums.add(md5(f.read()).hexdigest())
 
-    possible_checksums = {"d19a0358fa7d1d3ab144857ed91e883d", "c13447cdfb5865c8f95ef44e1bd39ab5"}
+    with open("test_data/test.txt1.tfrecord", "rb") as f:
+        checksums.add(md5(f.read()).hexdigest())
 
-    assert(checksum in possible_checksums)
+    print(checksums)
+
+    assert len(checksums) in [1, 2]
+
+    if len(checksums) == 1:
+        expected_checksums = [{'75102dcae42f1e2de7630693e7318724'}]
+    else:
+        expected_checksums = [{'75102dcae42f1e2de7630693e7318724', '0300107e8a25e9f92c3e4f845ed3272e'}]
+
+    assert checksums in expected_checksums
 
 
 def test_audio_dataset_fail_different_lengths():
     from deep_audio_dataset import AudioDataset
 
-    os.makedirs("test_data/in", exist_ok=True)
+    os.makedirs("test_data/in", exist_ok=False)
 
     with open("test_data/in/test0.wav", "wb") as file:
         data = generate_wav_data(1)
         file.write(data)
-    
+
     with open("test_data/in/test1.wav", "wb") as file:
         data = generate_wav_data(2)
         file.write(data)
@@ -134,7 +149,7 @@ def test_audio_dataset_fail_different_lengths():
 
     with pytest.raises(ValueError) as e:
         ad.generate()
-    
+
     assert(str(e.value) == "Multiple lengths detected (seconds): 1.0, 2.0")
 
     os.remove("test_data/in/test0.wav")
@@ -160,7 +175,7 @@ def test_audio_dataset_fail_do_not_exist():
 
     with pytest.raises(ValueError) as e:
         ad.generate()
-    
+
     assert(str(e.value) == "The following files do not exist: test_data/in/test1.wav")
 
     os.remove("test_data/in/test0.wav")
@@ -176,7 +191,7 @@ def test_audio_dataset_fail_multiple_sampling_rates():
     with open("test_data/in/test0.wav", "wb") as file:
         data = generate_wav_data(1)
         file.write(data)
-    
+
     with open("test_data/in/test1.wav", "wb") as file:
         data = generate_wav_data(1, sampling_rate=88200)
         file.write(data)
@@ -189,7 +204,7 @@ def test_audio_dataset_fail_multiple_sampling_rates():
 
     with pytest.raises(ValueError) as e:
         ad.generate()
-    
+
     assert(str(e.value) == "Multiple sampling rates detected: 44100, 88200")
 
     os.remove("test_data/in/test0.wav")
@@ -206,7 +221,7 @@ def test_audio_dataset_fail_bits_per_sample():
     with open("test_data/in/test0.wav", "wb") as file:
         data = generate_wav_data(1)
         file.write(data)
-    
+
     with open("test_data/in/test1.wav", "wb") as file:
         data = generate_wav_data(1, bits_per_sample=32)
         file.write(data)
@@ -219,7 +234,7 @@ def test_audio_dataset_fail_bits_per_sample():
 
     with pytest.raises(ValueError) as e:
         ad.generate()
-    
+
     assert(str(e.value) == "Multiple bits per sample detected: 16, 32")
 
     os.remove("test_data/in/test0.wav")
@@ -236,7 +251,7 @@ def test_audio_dataset_fail_multiple_channels():
     with open("test_data/in/test0.wav", "wb") as file:
         data = generate_wav_data(1)
         file.write(data)
-    
+
     with open("test_data/in/test1.wav", "wb") as file:
         data = generate_wav_data(1, num_channels=2)
         file.write(data)
@@ -249,7 +264,7 @@ def test_audio_dataset_fail_multiple_channels():
 
     with pytest.raises(ValueError) as e:
         ad.generate()
-    
+
     assert(str(e.value) == "Multiple number of channels detected: 1, 2")
 
     os.remove("test_data/in/test0.wav")

@@ -11,6 +11,7 @@ import shutil
 import time
 from typing import (
     Any,
+    Iterable,
     List,
     Mapping,
     Optional,
@@ -46,7 +47,14 @@ dataset.test
 
 
 class BaseAudioDataset(ABC):
-    def __init__(self, seed: Optional[Any] = None):
+    def __init__(self, directory: str, index_file: str, seed: Optional[Any] = None):
+        """
+
+        Args:
+            directory:
+            index_file (str): Name of the data index file.
+        """
+
         # create placeholders for datasets
         self.train = None
         self.validate = None
@@ -56,11 +64,15 @@ class BaseAudioDataset(ABC):
             self._rng = random.Random(time.time())
         else:
             self._rng = random.Random(seed)
-    
+
+        #store args as class members
+        self._dir = directory
+        self._name = index_file
+
     @abstractmethod
     def generate(self, *args, **kwargs) -> None:
         pass
-    
+
     def _analyze_files(self, files: List[Union[str, Path]]) -> Mapping[str, Any]:
         analysis = {
             "sampling_rates": set(),
@@ -89,9 +101,9 @@ class BaseAudioDataset(ABC):
             else:
                 analysis["all_exist"] = False
                 analysis["do_not_exist"].append(str(file))
-        
+
         return analysis
-    
+
     def _validate_audio_file_set(self, file_paths: List[Union[str, Path]]) -> None:
         """Validate that all of the wav files have consistent properties.
 
@@ -102,7 +114,7 @@ class BaseAudioDataset(ABC):
             ValueError: If one of the files does not exist or if multiple sampling rates, bits per sample, number of channels, or lengths are detected.
         """
         file_analysis = self._analyze_files(file_paths)
-        
+
         if not file_analysis["all_exist"]:
             raise ValueError(f"The following files do not exist: {', '.join(sorted(file_analysis['do_not_exist']))}")
         if len(file_analysis["sampling_rates"]) > 1:
@@ -117,17 +129,41 @@ class BaseAudioDataset(ABC):
         if len(file_analysis["lengths"]) > 1:
             lengths = ", ".join([str(x) for x in sorted(file_analysis["lengths"])])
             raise ValueError(f"Multiple lengths detected (seconds): {lengths}")
-        
+
         return
 
-class AudioDataset(BaseAudioDataset):
-    def __init__(self, directory, name, seed: Optional[Any] = None):
-        super().__init__(seed)
+    #generate an audio dataset & its associated tfrecords
+    def generate(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()) -> None:
+        #generate on CPU only. If flag isn't set false, GPU likely will OOM
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-        #store args as class members
-        self._dir = directory
-        self._name = name
+        #get list of all audio files from index file
+        with open(os.path.join(self._dir, self._name)) as f:
+            index = [tuple(i.strip().split(",")) for i in f.readlines()]
 
+        input_file_paths = [Path(self._dir).joinpath("in/" + f) for i in index for f in i if len(f) > 0]
+
+        self._validate_audio_file_set(input_file_paths)
+
+        #see if number of processes are excessive. if so, adjust to appropriate amt
+        if np.ceil(len(index)/ex_per_file) < n_processes:
+            n_processes = int(np.ceil(len(index)/ex_per_file))
+
+        #shuffle the indicies to guarentee randomness across files
+        self._rng.shuffle(index)
+
+        # example_chunks = np.array_split(index, ex_per_file)
+        if ex_per_file == 1:
+            example_chunks = [[x] for x in index]
+        else:
+            example_chunks = np.array_split(index, ex_per_file)
+
+        job_args = [(x, i, False if i != 0 else True) for i, x in enumerate(example_chunks)]
+
+        print(job_args)
+
+        with multiprocessing.Pool(n_processes) as pool:
+            pool.starmap(self._record_generation_job, job_args)
 
     #loads dataset from files into train, test, and val datasets
     def load(self, input_size, batch_size, train_split=0.7, val_split=0.15, test_split=0.15, shuffle_buffer=1024):
@@ -144,107 +180,6 @@ class AudioDataset(BaseAudioDataset):
         self.validate = self.test.skip(self._val_size).repeat().batch(self._batch_size)
         self.test = self.test.take(self._test_size).repeat().batch(self._batch_size)
 
-
-    #generate an audio dataset & its associated tfrecords
-    def generate(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()) -> None:
-        #generate on CPU only. If flag isn't set false, GPU likely will OOM
-        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
-        #get list of all audio files from index file
-        with open(os.path.join(self._dir, self._name)) as f:
-            index = [tuple(i.strip().split(",")) for i in f.readlines()]
-        
-        input_file_paths = [Path(self._dir).joinpath("in/" + f) for i in index for f in i if len(f) > 0]
-
-        self._validate_audio_file_set(input_file_paths)
-
-        #see if number of processes are excessive. if so, adjust to appropriate amt
-        if np.ceil(len(index)/ex_per_file) < n_processes:
-            n_processes = int(np.ceil(len(index)/ex_per_file))
-
-        #offset for consistent output file numbering across processes
-        offset = int((len(index)/ex_per_file)/n_processes)+1
-
-        #if files are smaller than ex_per_file, have offset be at least 1 to prevent files from being overwritten
-        if offset == 0:
-            offset = 1
-
-        #shuffle the indicies to guarentee randomness across files
-        self._rng.shuffle(index)
-
-        #create arguments to pass to subtasks
-        subarrays = np.array_split(index, n_processes)
-        for i, x in enumerate(subarrays):
-            if i == 0:
-                subarrays[i] = (x, ex_per_file, offset*i, True)
-            else:
-                subarrays[i] = (x, ex_per_file, offset*i, False)
-
-        #spawn multiproccesses
-        processes = []
-        for i in subarrays:
-            p = multiprocessing.Process(target=self._record_generation_job, args=i)
-            p.start()
-            processes.append(p)
-
-        #wait for processes to complete
-        for i in processes:
-            i.join()
-            if i.exitcode != 0:
-                raise Exception(f"Subprocess in generate_records returned a non-zero exit code ({i.exitcode}), check output for additional information.")
-
-
-    #write some information about dataset to json for future loading/human reading
-    def _write_params(self, input_lower, input_upper, n_steps, length, sample_rate, waves, mods):
-        params = {}
-
-        #for class functionality
-        params["size"] = n_steps * len(waves) * len(mods)
-        params["length"] = length
-        params["sample_rate"] = sample_rate
-
-        #for human reference
-        params["input_lower"] = input_lower
-        params["input_upper"] = input_upper
-        params["waves"] = waves
-        params["mods"] = mods
-
-        #write to json
-        with open(os.path.join(self._dir, "{0}.txt".format(self._name)), "w") as file:
-            json.dump(params, file)
-
-
-    #load some dataset parameters from saved json file
-    def _load_params(self, batch_size, train_split, val_split, test_split):
-        #load params from file and decode json
-        file = open(os.path.join(self._dir, "{0}.txt".format(self._name)), "r")
-        try:
-            params = json.load(file)
-        except:
-            print("Error loading json!")
-            file.close()
-            raise
-
-        file.close()
-
-        #assign values from json
-        self._batch_size = batch_size
-        self._length = params["length"]
-        self._sample_rate = params["sample_rate"]
-        self._size = params["size"]
-
-        #ensure that the splits sum to 1 and find n_entries per sub-dataset
-        if not ((train_split + val_split + test_split) == 1): raise ValueError("Data splits must sum to 1!")
-        self._train_size = int(train_split * self._size)
-        self._val_size = int(val_split * self._size)
-        self._test_size = int(test_split * self._size)
-
-        #steps per epoch for each sub-dataset
-        self.train_steps = int(self._train_size / self._batch_size)
-        self.val_steps = int(self._val_size / self._batch_size)
-        self.test_steps = int(self._test_size / self._batch_size)
-
-
     #wrapper to generate TF features for dataset. TF doesn't like train.Feature without the wrapper
     #copied directly from TF example code
     def _bytes_feature(self, value):
@@ -252,7 +187,6 @@ class AudioDataset(BaseAudioDataset):
         if isinstance(value, type(tf.constant(0))):
             value = value.numpy() # BytesList won't unpack a string from an EagerTensor.
         return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
-
 
     #return all tfrecord files matching pattern dir/name#.tfrecord
     def _get_records(self):
@@ -277,7 +211,6 @@ class AudioDataset(BaseAudioDataset):
 
         return d
 
-
     #make directories for audio generation
     def _make_dirs(self):
         #if ./_dir/ doesn't exist, make it and all others
@@ -296,29 +229,73 @@ class AudioDataset(BaseAudioDataset):
             except OSError as e:
                 raise
 
+    #write some information about dataset to json for future loading/human reading
+    # def _write_params(self, n_steps, length, sample_rate, waves, mods):
+    #     params = {}
 
-    #job for multiprocessed generation of tfrecords
-    def _record_generation_job(self, index, ex_per_file, offset, progress=False):
-        #create first file to write to
-        writer = tf.io.TFRecordWriter(os.path.join(self._dir, "{0}{1}.tfrecord".format(self._name, offset)))
+    #     #for class functionality
+    #     params["size"] = n_steps * len(waves) * len(mods)
+    #     params["length"] = length
+    #     params["sample_rate"] = sample_rate
 
-        #loop through each example and load into tfrecord files
+    #     #write to json
+    #     with open(os.path.join(self._dir, "{0}.txt".format(self._name)), "w") as file:
+    #         json.dump(params, file)
+
+
+    #load some dataset parameters from saved json file
+    # def _load_params(self, batch_size, train_split, val_split, test_split):
+    #     #load params from file and decode json
+    #     file = open(os.path.join(self._dir, "{0}.txt".format(self._name)), "r")
+    #     try:
+    #         params = json.load(file)
+    #     except:
+    #         print("Error loading json!")
+    #         file.close()
+    #         raise
+
+    #     file.close()
+
+    #     #assign values from json
+    #     self._batch_size = batch_size
+    #     self._length = params["length"]
+    #     self._sample_rate = params["sample_rate"]
+    #     self._size = params["size"]
+
+    #     #ensure that the splits sum to 1 and find n_entries per sub-dataset
+    #     if not ((train_split + val_split + test_split) == 1): raise ValueError("Data splits must sum to 1!")
+    #     self._train_size = int(train_split * self._size)
+    #     self._val_size = int(val_split * self._size)
+    #     self._test_size = int(test_split * self._size)
+
+    #     #steps per epoch for each sub-dataset
+    #     self.train_steps = int(self._train_size / self._batch_size)
+    #     self.val_steps = int(self._val_size / self._batch_size)
+    #     self.test_steps = int(self._test_size / self._batch_size)
+
+    def _record_generation_job(
+        self,
+        index: Iterable[List[str]],
+        id: int,
+        progress=False
+    ) -> None:
+        """
+        Job for multiprocessed generation of tfrecords.
+
+        Args:
+            index (iterable(list(str))): Iterable of index lists. Each element is a list of strings from the index configuration that represent an index configuration for a single example.
+            id (int): ID used for tfrecord file name.
+            progress (bool): Whether or not to print the progress bar. Defaults to False.
+        """
+        writer = tf.io.TFRecordWriter(os.path.join(self._dir, f"{self._name}{id}.tfrecord"))
+
         for i, files in enumerate(index):
-            #every ex_per_file create a new file. ex_per_file should be set such that the size of each tfrecord is between 100 and 200 mb
-            if (i % ex_per_file) == 0 and i != 0:
-                #close current writer and open new file
-                writer.close()
-                writer = tf.io.TFRecordWriter(os.path.join(self._dir, "{0}{1}.tfrecord".format(self._name, int(i/ex_per_file)+offset)))
+            input_file_path = os.path.join(self._dir, "in", files[0])
 
-            #open WAV files and convert to float arrays
-            file_x, file_y = os.path.join(self._dir, "in", files[0]), os.path.join(self._dir, "out", files[1]) #get file paths
-            x, _, y, _ = *tf.audio.decode_wav(tf.io.read_file(file_x)), *tf.audio.decode_wav(tf.io.read_file(file_y))
-            d = [x, y]
-            d = [tf.squeeze(j) for j in d]    #reshape x, y from [t, 1] to [t]
-
-            #tensorflow can only store float32, but WAV files are 16bit. use np methods to store as 16bit
-            feature = {"a_in": self._bytes_feature(np.asarray(d[0]).astype(np.float16).tobytes()),
-                       "a_out": self._bytes_feature(np.asarray(d[1]).astype(np.float16).tobytes())}
+            feature = {
+                "a_in": self._load_audio_feature(input_file_path),
+                "a_out": self.load_output_feature(files[1])
+            }
 
             #create TF example for proper serialization
             example = tf.train.Example(features=tf.train.Features(feature=feature))
@@ -328,6 +305,16 @@ class AudioDataset(BaseAudioDataset):
             if progress:
                 print("Creating TFRecords... {:.1f}%".format(100*i/len(index)), end="\r")
 
+    def _load_audio_feature(self, file_path: str) -> tf.train.Feature:
+        data, _ = tf.audio.decode_wav(tf.io.read_file(file_path))
+
+        #reshape x, y from [t, 1] to [t]
+        data = tf.squeeze(data)
+
+        #tensorflow can only store float32, but WAV files are 16bit. use np methods to store as 16bit
+        bytes_data = np.asarray(data).astype(np.float16).tobytes()
+
+        return self._bytes_feature(bytes_data)
 
     #the opposite of generate_audio(), removes all wav files after generation for storage reasons
     def _remove_wav(self):
@@ -337,3 +324,13 @@ class AudioDataset(BaseAudioDataset):
             os.remove(os.path.join(self._dir, self._name))
         except OSError as e:
             print("Error: {0} - {1}".format(e.filename, e.strerror))
+
+    @abstractmethod
+    def load_output_feature(self, output_index: str) -> tf.train.Feature:
+        pass
+
+class AudioDataset(BaseAudioDataset):
+
+    def load_output_feature(self, output_index: str) -> tf.train.Feature:
+        output_file_path = os.path.join(self._dir, "out", output_index)
+        return self._load_audio_feature(output_file_path)
