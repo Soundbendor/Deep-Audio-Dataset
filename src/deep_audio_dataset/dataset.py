@@ -132,6 +132,9 @@ class BaseAudioDataset(ABC):
 
         return
 
+    def analyze_index_outputs(self, outputs: List[str]) -> None:
+        return
+
     #generate an audio dataset & its associated tfrecords
     def generate(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()) -> None:
         #generate on CPU only. If flag isn't set false, GPU likely will OOM
@@ -139,9 +142,16 @@ class BaseAudioDataset(ABC):
 
         #get list of all audio files from index file
         with open(os.path.join(self._dir, self._name)) as f:
-            index = [tuple(i.strip().split(",")) for i in f.readlines()]
+            index = [tuple(line.strip().split(",")) for line in f.readlines()]
 
-        input_file_paths = [Path(self._dir).joinpath("in/" + f) for i in index for f in i if len(f) > 0]
+        inputs = [x[0] for x in index]
+        outputs = [",".join(x[1:]) for x in index]
+
+        self.analyze_index_outputs(outputs)
+
+        # don't check values if they don't end in "wav"
+        # FIXME this is pretty spotty behaviour, need a more robust system of inspecting inputs and outputs in BaseAudioDataset
+        input_file_paths = [Path(self._dir).joinpath("in/" + f) for i in index for f in i if len(f) > 0 and f.endswith("wav")]
 
         self._validate_audio_file_set(input_file_paths)
 
@@ -158,7 +168,7 @@ class BaseAudioDataset(ABC):
         else:
             example_chunks = np.array_split(index, ex_per_file)
 
-        job_args = [(x, i, False if i != 0 else True) for i, x in enumerate(example_chunks)]
+        job_args = [(x, i, False if i != 0 else True) for i, x in enumerate(example_chunks) if len(x) > 0]
 
         print(job_args)
 
@@ -202,7 +212,7 @@ class BaseAudioDataset(ABC):
 
         #convert from binary to floats
         features["a_in"] = tf.io.decode_raw(features["a_in"], tf.float16)
-        features["a_out"] = tf.io.decode_raw(features["a_out"], tf.float16)
+        features["a_out"] = tf.io.decode_raw(features["a_out"], tf.float32)
 
         #split into sections to feed into LSTM
         #zero pad values so split works
@@ -334,3 +344,13 @@ class AudioDataset(BaseAudioDataset):
     def load_output_feature(self, output_index: str) -> tf.train.Feature:
         output_file_path = os.path.join(self._dir, "out", output_index)
         return self._load_audio_feature(output_file_path)
+
+
+class MultilabelClassificationAudioDataset(BaseAudioDataset):
+
+    def analyze_index_outputs(self, outputs: List[str]) -> None:
+        self.label_length = len(outputs[0])
+        return
+
+    def load_output_feature(self, output_index: str) -> tf.train.Feature:
+        return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index], dtype="float32")))

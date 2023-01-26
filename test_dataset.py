@@ -5,8 +5,12 @@ import shutil
 
 import numpy as np
 import pytest
+import tensorflow as tf
 
-from deep_audio_dataset import AudioDataset
+from deep_audio_dataset import (
+    AudioDataset,
+    MultilabelClassificationAudioDataset,
+)
 
 
 def generate_sin_wav(frequency: int, total_seconds: int, samples_per_second: int = 44100, bits_per_sample: int = 16):
@@ -271,3 +275,104 @@ def test_audio_dataset_fail_multiple_channels():
     os.remove("test_data/in/test1.wav")
     os.remove("test_data/test.txt")
     shutil.rmtree("test_data")
+
+
+def test_multilabel_classification(tmp_path):
+    os.makedirs(f"{tmp_path}/in", exist_ok=False)
+
+    with open(f"{tmp_path}/in/test0.wav", "wb") as file:
+        data = generate_wav_data(1)
+        file.write(data)
+
+    with open(f"{tmp_path}/test.txt", "w") as f:
+        f.writelines(["test0.wav,1"])
+
+
+    dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
+    dataset.generate()
+
+    print(list(Path(tmp_path).glob("*.tfrecord")))
+
+    feature_description = {
+        'a_in': tf.io.FixedLenFeature([], tf.string),
+        'a_out': tf.io.FixedLenFeature([], tf.float32)
+    }
+
+    def _parser(x):
+        return tf.io.parse_single_example(x, feature_description)
+
+    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
+    parsed_ds = raw_ds.map(_parser)
+
+    out_result = [x["a_out"].numpy() for x in parsed_ds]
+
+    assert out_result == [1.0]
+
+
+def test_multilabel_classification_two_labels(tmp_path):
+    os.makedirs(f"{tmp_path}/in", exist_ok=False)
+
+    with open(f"{tmp_path}/in/test0.wav", "wb") as file:
+        data = generate_wav_data(1)
+        file.write(data)
+
+    with open(f"{tmp_path}/test.txt", "w") as f:
+        f.writelines(["test0.wav,01"])
+
+
+    dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
+    dataset.generate()
+
+    print(list(Path(tmp_path).glob("*.tfrecord")))
+
+    feature_description = {
+        'a_in': tf.io.FixedLenFeature([], tf.string),
+        'a_out': tf.io.FixedLenFeature([2], tf.float32)
+    }
+
+    def _parser(x):
+        return tf.io.parse_single_example(x, feature_description)
+
+    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
+    parsed_ds = raw_ds.map(_parser)
+
+    out_result = [x["a_out"].numpy() for x in parsed_ds]
+
+    assert all(out_result[0] == [0.0, 1.0])
+
+
+def test_multilabel_classification_two_samples(tmp_path):
+    os.makedirs(f"{tmp_path}/in", exist_ok=False)
+
+    with open(f"{tmp_path}/in/test0.wav", "wb") as file:
+        data = generate_wav_data(1)
+        file.write(data)
+
+    with open(f"{tmp_path}/in/test1.wav", "wb") as file:
+        data = generate_wav_data(1)
+        file.write(data)
+
+    with open(f"{tmp_path}/test.txt", "w") as f:
+        f.writelines(["test0.wav,01", "\ntest1.wav,10"])
+
+
+    dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
+    dataset.generate()
+
+    print(list(Path(tmp_path).glob("*.tfrecord")))
+
+    feature_description = {
+        'a_in': tf.io.FixedLenFeature([], tf.string),
+        'a_out': tf.io.FixedLenFeature([dataset.label_length], tf.float32)
+    }
+
+    def _parser(x):
+        return tf.io.parse_single_example(x, feature_description)
+
+    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
+    parsed_ds = raw_ds.map(_parser)
+
+    out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
+
+    assert all(out_result[0] == [0.0, 1.0])
+    assert all(out_result[1] == [1.0, 0.0])
