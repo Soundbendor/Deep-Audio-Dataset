@@ -1,4 +1,5 @@
 from hashlib import md5
+import json
 import os
 from pathlib import Path
 import shutil
@@ -376,3 +377,54 @@ def test_multilabel_classification_two_samples(tmp_path):
 
     assert all(out_result[0] == [0.0, 1.0])
     assert all(out_result[1] == [1.0, 0.0])
+
+
+@pytest.mark.tdd
+def test_dataset_with_metadata(tmp_path):
+    os.makedirs(f"{tmp_path}/in", exist_ok=False)
+    os.makedirs(f"{tmp_path}/out", exist_ok=False)
+
+    with open(f"{tmp_path}/in/test0.wav", "wb") as file:
+        data = generate_wav_data(1)
+        file.write(data)
+
+    with open(f"{tmp_path}/out/test0.wav", "wb") as file:
+        data = generate_wav_data(1)
+        file.write(data)
+
+    with open(f"{tmp_path}/test.txt", "w") as f:
+        f.writelines(["test0.wav,test0.wav"])
+
+    with open(f"{tmp_path}/metadata.txt", "w") as f:
+        metadata = {
+            "test0.wav": {
+                "artist": "Artist0"
+            }
+        }
+        json.dump(metadata, f)
+
+
+
+    dataset = AudioDataset(tmp_path, "test.txt", metadata_file="metadata.txt")
+    dataset.generate()
+
+    assert dataset.metadata is not None
+    assert dataset.metadata["test0.wav"] == {"artist": "Artist0"}
+    assert dataset.metadata_stats["fields"] == ["artist"]
+    assert dataset.metadata_stats["values"]["artist"] == ["Artist0"]
+
+    feature_description = {
+        'a_in': tf.io.FixedLenFeature([], tf.string),
+        'a_out': tf.io.FixedLenFeature([], tf.string),
+        'metadata': tf.io.VarLenFeature(tf.string)
+    }
+
+    def _parser(x):
+        return tf.io.parse_single_example(x, feature_description)
+
+    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
+    parsed_ds = raw_ds.map(_parser)
+
+    recovered_metadata = [json.loads(x["metadata"].values.numpy()[0].decode()) for x in parsed_ds]
+
+    assert recovered_metadata == [metadata["test0.wav"]]

@@ -47,7 +47,7 @@ dataset.test
 
 
 class BaseAudioDataset(ABC):
-    def __init__(self, directory: str, index_file: str, seed: Optional[Any] = None):
+    def __init__(self, directory: str, index_file: str, seed: Optional[Any] = None, metadata_file: Optional[str] = None):
         """
 
         Args:
@@ -68,6 +68,10 @@ class BaseAudioDataset(ABC):
         #store args as class members
         self._dir = directory
         self._name = index_file
+
+        self._metadata_file = metadata_file
+        self.metadata = None
+        self.metadata_stats = None
 
     @abstractmethod
     def generate(self, *args, **kwargs) -> None:
@@ -135,6 +139,36 @@ class BaseAudioDataset(ABC):
     def analyze_index_outputs(self, outputs: List[str]) -> None:
         return
 
+    def load_metadata(self) -> Optional[List[dict]]:
+        # check if metadata exists, and if so then load it for the indices
+        if self._metadata_file:
+            with open(os.path.join(self._dir, self._metadata_file)) as f:
+                metadata = json.load(f)
+            self.metadata = metadata
+
+            stats = {
+                "fields": set(),
+                "values": {}
+            }
+
+            for index in metadata:
+                for field, value in metadata[index].items():
+                    if not isinstance(value, str):
+                        raise Exception(f"Only string values are allowed in metadata. Found {value} with type {type(value)}")
+                    stats["fields"].add(field)
+                    if field not in stats["values"]:
+                        stats["values"][field] = set()
+                    stats["values"][field].add(value)
+
+            stats["fields"] = list(stats["fields"])
+            for field in stats["values"]:
+                stats["values"][field] = list(stats["values"][field])
+
+            self.metadata_stats = stats
+
+
+
+
     #generate an audio dataset & its associated tfrecords
     def generate(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()) -> None:
         #generate on CPU only. If flag isn't set false, GPU likely will OOM
@@ -155,6 +189,8 @@ class BaseAudioDataset(ABC):
 
         self._validate_audio_file_set(input_file_paths)
 
+        self.load_metadata()
+
         #see if number of processes are excessive. if so, adjust to appropriate amt
         if np.ceil(len(index)/ex_per_file) < n_processes:
             n_processes = int(np.ceil(len(index)/ex_per_file))
@@ -168,7 +204,7 @@ class BaseAudioDataset(ABC):
         else:
             example_chunks = np.array_split(index, ex_per_file)
 
-        job_args = [(x, i, False if i != 0 else True) for i, x in enumerate(example_chunks) if len(x) > 0]
+        job_args = [(x, i, [self.metadata[index_name[0]] for index_name in x] if self.metadata else []) for i, x in enumerate(example_chunks) if len(x) > 0]
 
         print(job_args)
 
@@ -287,7 +323,7 @@ class BaseAudioDataset(ABC):
         self,
         index: Iterable[List[str]],
         id: int,
-        progress=False
+        metadata: Iterable[dict]
     ) -> None:
         """
         Job for multiprocessed generation of tfrecords.
@@ -296,6 +332,7 @@ class BaseAudioDataset(ABC):
             index (iterable(list(str))): Iterable of index lists. Each element is a list of strings from the index configuration that represent an index configuration for a single example.
             id (int): ID used for tfrecord file name.
             progress (bool): Whether or not to print the progress bar. Defaults to False.
+            metadata (iterable(dict)): Metadata dictionaries to also encode.
         """
         writer = tf.io.TFRecordWriter(os.path.join(self._dir, f"{self._name}{id}.tfrecord"))
 
@@ -307,13 +344,18 @@ class BaseAudioDataset(ABC):
                 "a_out": self.load_output_feature(files[1])
             }
 
+            if metadata:
+                print(metadata[i])
+                print(json.dumps(metadata[i]).encode())
+                feature["metadata"] = tf.train.Feature(bytes_list=tf.train.BytesList(value=[json.dumps(metadata[i]).encode()]))
+
             #create TF example for proper serialization
             example = tf.train.Example(features=tf.train.Features(feature=feature))
             writer.write(example.SerializeToString())
 
             #update progress
-            if progress:
-                print("Creating TFRecords... {:.1f}%".format(100*i/len(index)), end="\r")
+            # if progress:
+            #     print("Creating TFRecords... {:.1f}%".format(100*i/len(index)), end="\r")
 
     def _load_audio_feature(self, file_path: str) -> tf.train.Feature:
         data, _ = tf.audio.decode_wav(tf.io.read_file(file_path))
