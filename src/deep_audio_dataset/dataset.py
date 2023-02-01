@@ -341,7 +341,7 @@ class BaseAudioDataset(ABC):
 
             feature = {
                 "a_in": self._load_audio_feature(input_file_path),
-                "a_out": self.load_output_feature(files[1])
+                "a_out": self.load_output_feature(files[1:])
             }
 
             if metadata:
@@ -426,3 +426,15 @@ class MultilabelClassificationAudioDataset(BaseAudioDataset):
 
     def load_output_feature(self, output_index: str) -> tf.train.Feature:
         return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index], dtype="float32")))
+
+
+class RegressionAudioDataset(BaseAudioDataset):
+
+    def analyze_index_outputs(self, outputs: List[str]) -> None:
+        self.n_ = len(outputs[0].split(","))
+
+    def _output_feature_type(self):
+        return tf.io.FixedLenFeature([self.n_], tf.float32)
+
+    def load_output_feature(self, output_index: str) -> tf.train.Feature:
+        return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(target) for target in output_index], dtype="float32")))
