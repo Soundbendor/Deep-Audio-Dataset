@@ -11,6 +11,7 @@ import tensorflow as tf
 from deep_audio_dataset import (
     AudioDataset,
     MultilabelClassificationAudioDataset,
+    RegressionAudioDataset,
 )
 
 
@@ -458,3 +459,34 @@ def test_dataset_kfold_metadata(tmp_path):
     assert len(meta_values) == 2
     assert "Artist0" in meta_values
     assert "Artist1" in meta_values
+
+
+def test_regression_dataset(tmp_path):
+    os.makedirs(f"{tmp_path}/in", exist_ok=False)
+
+    for i in range(1):
+        with open(f"{tmp_path}/in/test{i}.wav", "wb") as file:
+            data = generate_wav_data(1)
+            file.write(data)
+
+    with open(f"{tmp_path}/test.txt", "w") as f:
+        f.writelines([f"test{i}.wav,1.0,0.0\n" for i in range(1)])
+
+
+    dataset = RegressionAudioDataset(tmp_path, "test.txt")
+    dataset.generate()
+
+    feature_description = {
+        'a_in': tf.io.FixedLenFeature([], tf.string),
+        'a_out': tf.io.FixedLenFeature([dataset.n_], tf.float32)
+    }
+
+    def _parser(x):
+        return tf.io.parse_single_example(x, feature_description)
+
+    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
+    parsed_ds = raw_ds.map(_parser)
+
+    out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
+
+    assert all(out_result[0] == [1.0, 0.0])
