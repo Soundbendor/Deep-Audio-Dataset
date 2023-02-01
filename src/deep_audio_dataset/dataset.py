@@ -438,3 +438,37 @@ class RegressionAudioDataset(BaseAudioDataset):
 
     def load_output_feature(self, output_index: str) -> tf.train.Feature:
         return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(target) for target in output_index], dtype="float32")))
+
+    def kfold_on_metadata(self, metadata_field: str):
+        feature_description = {
+            'a_in': tf.io.FixedLenFeature([], tf.string),
+            'a_out': self._output_feature_type(),
+            'metadata': tf.io.VarLenFeature(tf.string)
+        }
+
+        def _parser(x):
+            return tf.io.parse_single_example(x, feature_description)
+
+        raw_ds = tf.data.TFRecordDataset(list(Path(self._dir).glob("*.tfrecord")))
+        parsed_ds = raw_ds.map(_parser)
+
+        for value in self.metadata_stats["values"][metadata_field]:
+            # grab the tfrecords and map them with a filter
+            x_training_set = []
+            y_training_set = []
+            x_test_set = []
+            y_test_set = []
+
+            for x in parsed_ds:
+                metadata = json.loads(x["metadata"].values.numpy()[0].decode())
+                if metadata[metadata_field] == value:
+                    x_test_set.append([np.frombuffer(x["a_in"].numpy(), dtype="float16")])
+                    y_test_set.append(tf.reshape(x["a_out"], (1, self.n_)))
+                else:
+                    x_training_set.append([np.frombuffer(x["a_in"].numpy(), dtype="float16")])
+                    y_training_set.append(tf.reshape(x["a_out"], (1, self.n_)))
+
+            training_set = tf.data.Dataset.from_tensor_slices((x_training_set, y_training_set))
+            test_set = tf.data.Dataset.from_tensor_slices((x_test_set, y_test_set))
+
+            yield training_set, test_set, value
