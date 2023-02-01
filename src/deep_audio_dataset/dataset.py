@@ -1,6 +1,7 @@
 #paritally based on pytorch code by Alexander Corley
 from abc import ABC, abstractmethod
 import csv
+from functools import partial
 import glob
 import json
 import multiprocessing
@@ -15,6 +16,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Tuple,
     Union,
 )
 import wave
@@ -206,8 +208,6 @@ class BaseAudioDataset(ABC):
 
         job_args = [(x, i, [self.metadata[index_name[0]] for index_name in x] if self.metadata else []) for i, x in enumerate(example_chunks) if len(x) > 0]
 
-        print(job_args)
-
         with multiprocessing.Pool(n_processes) as pool:
             pool.starmap(self._record_generation_job, job_args)
 
@@ -345,8 +345,6 @@ class BaseAudioDataset(ABC):
             }
 
             if metadata:
-                print(metadata[i])
-                print(json.dumps(metadata[i]).encode())
                 feature["metadata"] = tf.train.Feature(bytes_list=tf.train.BytesList(value=[json.dumps(metadata[i]).encode()]))
 
             #create TF example for proper serialization
@@ -381,6 +379,35 @@ class BaseAudioDataset(ABC):
     def load_output_feature(self, output_index: str) -> tf.train.Feature:
         pass
 
+    def _output_feature_type(self):
+        return tf.io.FixedLenFeature([], tf.string)
+
+    def kfold_on_metadata(self, metadata_field: str) -> Tuple[tf.train.Feature, tf.train.Feature, str]:
+        feature_description = {
+            'a_in': tf.io.FixedLenFeature([], tf.string),
+            'a_out': self._output_feature_type(),
+            'metadata': tf.io.VarLenFeature(tf.string)
+        }
+
+        def _parser(x):
+            return tf.io.parse_single_example(x, feature_description)
+
+        raw_ds = tf.data.TFRecordDataset(list(Path(self._dir).glob("*.tfrecord")))
+        parsed_ds = raw_ds.map(_parser)
+
+        for value in self.metadata_stats["values"][metadata_field]:
+            # grab the tfrecords and map them with a filter
+            training_set = []
+            test_set = []
+            for x in parsed_ds:
+                metadata = json.loads(x["metadata"].values.numpy()[0].decode())
+                if metadata[metadata_field] == value:
+                    test_set.append([x["a_in"], x["a_out"]])
+                else:
+                    training_set.append([x["a_in"], x["a_out"]])
+
+            yield tf.data.Dataset.from_tensor_slices(training_set), tf.data.Dataset.from_tensor_slices(test_set), value
+
 class AudioDataset(BaseAudioDataset):
 
     def load_output_feature(self, output_index: str) -> tf.train.Feature:
@@ -393,6 +420,9 @@ class MultilabelClassificationAudioDataset(BaseAudioDataset):
     def analyze_index_outputs(self, outputs: List[str]) -> None:
         self.label_length = len(outputs[0])
         return
+
+    def _output_feature_type(self):
+        return tf.io.FixedLenFeature([self.label_length], tf.float32)
 
     def load_output_feature(self, output_index: str) -> tf.train.Feature:
         return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index], dtype="float32")))
