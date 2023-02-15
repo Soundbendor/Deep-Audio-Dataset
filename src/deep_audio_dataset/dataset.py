@@ -204,7 +204,7 @@ class BaseAudioDataset(ABC):
         if ex_per_file == 1:
             example_chunks = [[x] for x in index]
         else:
-            example_chunks = np.array_split(index, ex_per_file)
+            example_chunks = [x for x in np.array_split(index, ex_per_file) if len(x) > 0]
 
         job_args = [(x, i, [self.metadata[index_name[0]] for index_name in x] if self.metadata else []) for i, x in enumerate(example_chunks) if len(x) > 0]
 
@@ -411,7 +411,7 @@ class BaseAudioDataset(ABC):
 class AudioDataset(BaseAudioDataset):
 
     def load_output_feature(self, output_index: str) -> tf.train.Feature:
-        output_file_path = os.path.join(self._dir, "out", output_index)
+        output_file_path = os.path.join(self._dir, "out", output_index[0])
         return self._load_audio_feature(output_file_path)
 
 
