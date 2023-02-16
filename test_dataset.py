@@ -361,8 +361,6 @@ def test_multilabel_classification_two_samples(tmp_path):
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
     dataset.generate()
 
-    print(list(Path(tmp_path).glob("*.tfrecord")))
-
     feature_description = {
         'a_in': tf.io.FixedLenFeature([], tf.string),
         'a_out': tf.io.FixedLenFeature([dataset.label_length], tf.float32)
@@ -373,6 +371,8 @@ def test_multilabel_classification_two_samples(tmp_path):
 
     raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
     parsed_ds = raw_ds.map(_parser)
+
+    print(parsed_ds)
 
     out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
 
