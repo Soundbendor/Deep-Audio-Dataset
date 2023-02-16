@@ -1,3 +1,6 @@
+import os
+import shutil
+
 import numpy as np
 
 
@@ -56,4 +59,30 @@ def generate_wav_data(
     return riff_chunk + wave_chunk + fmt_chunk + data_chunk
 
 
+def generate_wav_files(n: int, base_path: str):
+    files = []
 
+    os.makedirs(f"{base_path}/test_data/in", exist_ok=False)
+    os.makedirs(f"{base_path}/test_data/out", exist_ok=False)
+
+    for i in range(n):
+        filename = f"{base_path}/test_data/in/test{i}.wav"
+        # freq = 440 * (i + 1)
+        freq = 0.0
+        with open(filename, "wb") as file:
+            data = generate_wav_data(10, freq)
+            file.write(data)
+        files.append(filename)
+
+        filename = f"{base_path}/test_data/out/test{i}.wav"
+        with open(filename, "wb") as file:
+            data = generate_wav_data(10, freq)
+            file.write(data)
+        files.append(filename)
+
+    with open(f"{base_path}/test_data/test.txt", "w") as f:
+        for i in range(n):
+            f.write(f"test{i}.wav,test{i}.wav\n")
+        files.append(f"{base_path}/test_data/test.txt")
+
+    return files

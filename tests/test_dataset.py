@@ -14,59 +14,28 @@ from deep_audio_dataset import (
     RegressionAudioDataset,
 )
 
-from testutils import generate_wav_data
+from test_utils import generate_wav_files, generate_wav_data
 
 
 @pytest.fixture
-def wav_files():
-    # FIXME should use pytests built in tmp directory fixture
-    files = []
-
-    os.makedirs("test_data/in", exist_ok=False)
-    os.makedirs("test_data/out", exist_ok=False)
-
-    for i in range(2):
-        filename = f"test_data/in/test{i}.wav"
-        # freq = 440 * (i + 1)
-        freq = 0.0
-        with open(filename, "wb") as file:
-            data = generate_wav_data(10, freq)
-            file.write(data)
-        files.append(filename)
-
-        filename = f"test_data/out/test{i}.wav"
-        with open(filename, "wb") as file:
-            data = generate_wav_data(10, freq)
-            file.write(data)
-        files.append(filename)
+def two_wav_files(tmp_path):
+    return generate_wav_files(2, tmp_path), tmp_path
 
 
-    with open("test_data/test.txt", "w") as f:
-        f.writelines(["test0.wav,test0.wav\n", "test1.wav,test1.wav"])
-        files.append("test_data/test.txt")
-
-    yield files
-
-    for file in files:
-        os.remove(file)
-
-    shutil.rmtree("test_data")
-
-
-def test_audio_dataset_generate(wav_files):
-    from deep_audio_dataset import AudioDataset
-    ad = AudioDataset("test_data", "test.txt")
+def test_audio_dataset_generate(two_wav_files):
+    base_path = two_wav_files[1]
+    ad = AudioDataset(f"{base_path}/test_data", "test.txt")
     ad.generate(ex_per_file=1)
 
-    assert(Path("test_data/test.txt0.tfrecord").exists())
-    assert(Path("test_data/test.txt1.tfrecord").exists())
+    assert(Path(f"{base_path}/test_data/test.txt0.tfrecord").exists())
+    assert(Path(f"{base_path}/test_data/test.txt1.tfrecord").exists())
 
     checksums = set()
 
-    with open("test_data/test.txt0.tfrecord", "rb") as f:
+    with open(f"{base_path}/test_data/test.txt0.tfrecord", "rb") as f:
         checksums.add(md5(f.read()).hexdigest())
 
-    with open("test_data/test.txt1.tfrecord", "rb") as f:
+    with open(f"{base_path}/test_data/test.txt1.tfrecord", "rb") as f:
         checksums.add(md5(f.read()).hexdigest())
 
     print(checksums)
