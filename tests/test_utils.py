@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
 import shutil
+from typing import List
 
 import numpy as np
+import tensorflow as tf
 
 
 def generate_sin_wav(frequency: int, total_seconds: int, samples_per_second: int = 44100, bits_per_sample: int = 16):
@@ -59,7 +62,7 @@ def generate_wav_data(
     return riff_chunk + wave_chunk + fmt_chunk + data_chunk
 
 
-def generate_wav_files(n: int, base_path: str):
+def generate_wav_files(n: int, base_path: str) -> List[str]:
     files = []
 
     os.makedirs(f"{base_path}/test_data/in", exist_ok=False)
@@ -86,3 +89,18 @@ def generate_wav_files(n: int, base_path: str):
         files.append(f"{base_path}/test_data/test.txt")
 
     return files
+
+
+def load_and_parse_tfrecords(base_path: str, out_feature):
+    feature_description = {
+        'a_in': tf.io.FixedLenFeature([], tf.string),
+        'a_out': out_feature
+    }
+
+    def _parser(x):
+        return tf.io.parse_single_example(x, feature_description)
+
+    raw_ds = tf.data.TFRecordDataset(list(Path(base_path).glob("*.tfrecord")))
+    parsed_ds = raw_ds.map(_parser)
+
+    return parsed_ds

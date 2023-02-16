@@ -14,7 +14,7 @@ from deep_audio_dataset import (
     RegressionAudioDataset,
 )
 
-from test_utils import generate_wav_files, generate_wav_data
+from test_utils import generate_wav_files, generate_wav_data, load_and_parse_tfrecords
 
 
 @pytest.fixture
@@ -209,18 +209,7 @@ def test_multilabel_classification(tmp_path):
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
     dataset.generate()
 
-    print(list(Path(tmp_path).glob("*.tfrecord")))
-
-    feature_description = {
-        'a_in': tf.io.FixedLenFeature([], tf.string),
-        'a_out': tf.io.FixedLenFeature([], tf.float32)
-    }
-
-    def _parser(x):
-        return tf.io.parse_single_example(x, feature_description)
-
-    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
-    parsed_ds = raw_ds.map(_parser)
+    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([], tf.float32))
 
     out_result = [x["a_out"].numpy() for x in parsed_ds]
 
@@ -241,18 +230,7 @@ def test_multilabel_classification_two_labels(tmp_path):
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
     dataset.generate()
 
-    print(list(Path(tmp_path).glob("*.tfrecord")))
-
-    feature_description = {
-        'a_in': tf.io.FixedLenFeature([], tf.string),
-        'a_out': tf.io.FixedLenFeature([2], tf.float32)
-    }
-
-    def _parser(x):
-        return tf.io.parse_single_example(x, feature_description)
-
-    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
-    parsed_ds = raw_ds.map(_parser)
+    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([2], tf.float32))
 
     out_result = [x["a_out"].numpy() for x in parsed_ds]
 
@@ -277,18 +255,7 @@ def test_multilabel_classification_two_samples(tmp_path):
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
     dataset.generate()
 
-    feature_description = {
-        'a_in': tf.io.FixedLenFeature([], tf.string),
-        'a_out': tf.io.FixedLenFeature([dataset.label_length], tf.float32)
-    }
-
-    def _parser(x):
-        return tf.io.parse_single_example(x, feature_description)
-
-    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
-    parsed_ds = raw_ds.map(_parser)
-
-    print(parsed_ds)
+    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([dataset.label_length], tf.float32))
 
     out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
 
@@ -392,16 +359,9 @@ def test_regression_dataset(tmp_path):
     dataset = RegressionAudioDataset(tmp_path, "test.txt")
     dataset.generate()
 
-    feature_description = {
-        'a_in': tf.io.FixedLenFeature([], tf.string),
-        'a_out': tf.io.FixedLenFeature([dataset.n_], tf.float32)
-    }
+    assert dataset.n_ == 2
 
-    def _parser(x):
-        return tf.io.parse_single_example(x, feature_description)
-
-    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
-    parsed_ds = raw_ds.map(_parser)
+    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([2], tf.float32))
 
     out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
 
