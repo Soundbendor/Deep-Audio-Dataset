@@ -376,7 +376,7 @@ class BaseAudioDataset(ABC):
             print("Error: {0} - {1}".format(e.filename, e.strerror))
 
     @abstractmethod
-    def load_output_feature(self, output_index: str) -> tf.train.Feature:
+    def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
         pass
 
     def _output_feature_type(self):
@@ -410,7 +410,7 @@ class BaseAudioDataset(ABC):
 
 class AudioDataset(BaseAudioDataset):
 
-    def load_output_feature(self, output_index: str) -> tf.train.Feature:
+    def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
         output_file_path = os.path.join(self._dir, "out", output_index[0])
         return self._load_audio_feature(output_file_path)
 
@@ -424,8 +424,8 @@ class MultilabelClassificationAudioDataset(BaseAudioDataset):
     def _output_feature_type(self):
         return tf.io.FixedLenFeature([self.label_length], tf.float32)
 
-    def load_output_feature(self, output_index: str) -> tf.train.Feature:
-        return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index], dtype="float32")))
+    def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
+        return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index[0]], dtype="float32")))
 
 
 class RegressionAudioDataset(BaseAudioDataset):
