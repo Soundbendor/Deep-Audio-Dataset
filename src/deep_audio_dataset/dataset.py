@@ -275,50 +275,6 @@ class BaseAudioDataset(ABC):
             except OSError as e:
                 raise
 
-    #write some information about dataset to json for future loading/human reading
-    # def _write_params(self, n_steps, length, sample_rate, waves, mods):
-    #     params = {}
-
-    #     #for class functionality
-    #     params["size"] = n_steps * len(waves) * len(mods)
-    #     params["length"] = length
-    #     params["sample_rate"] = sample_rate
-
-    #     #write to json
-    #     with open(os.path.join(self._dir, "{0}.txt".format(self._name)), "w") as file:
-    #         json.dump(params, file)
-
-
-    #load some dataset parameters from saved json file
-    # def _load_params(self, batch_size, train_split, val_split, test_split):
-    #     #load params from file and decode json
-    #     file = open(os.path.join(self._dir, "{0}.txt".format(self._name)), "r")
-    #     try:
-    #         params = json.load(file)
-    #     except:
-    #         print("Error loading json!")
-    #         file.close()
-    #         raise
-
-    #     file.close()
-
-    #     #assign values from json
-    #     self._batch_size = batch_size
-    #     self._length = params["length"]
-    #     self._sample_rate = params["sample_rate"]
-    #     self._size = params["size"]
-
-    #     #ensure that the splits sum to 1 and find n_entries per sub-dataset
-    #     if not ((train_split + val_split + test_split) == 1): raise ValueError("Data splits must sum to 1!")
-    #     self._train_size = int(train_split * self._size)
-    #     self._val_size = int(val_split * self._size)
-    #     self._test_size = int(test_split * self._size)
-
-    #     #steps per epoch for each sub-dataset
-    #     self.train_steps = int(self._train_size / self._batch_size)
-    #     self.val_steps = int(self._val_size / self._batch_size)
-    #     self.test_steps = int(self._test_size / self._batch_size)
-
     def _record_generation_job(
         self,
         index: Iterable[List[str]],
