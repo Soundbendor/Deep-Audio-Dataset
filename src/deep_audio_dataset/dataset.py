@@ -266,24 +266,6 @@ class BaseAudioDataset(ABC):
 
         return d
 
-    #make directories for audio generation
-    def _make_dirs(self):
-        #if ./_dir/ doesn't exist, make it and all others
-        if not os.path.exists(self._dir):
-            try:
-                os.makedirs(self._dir)
-                os.makedirs(os.path.join(self._dir, "in"))
-                os.makedirs(os.path.join(self._dir, "out"))
-            except OSError as e:
-                raise
-        #if ./_dir/ exists, but in and out don't (ie if remove_wav=True on previous gen)
-        elif not (os.path.exists(os.path.join(self._dir, "in")) or os.path.exists(os.path.join(self._dir, "out"))):
-            try:
-                os.makedirs(os.path.join(self._dir, "in"))
-                os.makedirs(os.path.join(self._dir, "out"))
-            except OSError as e:
-                raise
-
     def _record_generation_job(
         self,
         index: Iterable[List[str]],
@@ -338,15 +320,6 @@ class BaseAudioDataset(ABC):
         bytes_data = np.asarray(data).astype(np.float16).tobytes()
 
         return self._bytes_feature(bytes_data)
-
-    #the opposite of generate_audio(), removes all wav files after generation for storage reasons
-    def _remove_wav(self):
-        try:
-            shutil.rmtree(os.path.join(self._dir, "in"))
-            shutil.rmtree(os.path.join(self._dir, "out"))
-            os.remove(os.path.join(self._dir, self._name))
-        except OSError as e:
-            print("Error: {0} - {1}".format(e.filename, e.strerror))
 
     @abstractmethod
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
