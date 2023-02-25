@@ -144,8 +144,13 @@ class BaseAudioDataset(ABC):
 
             self.metadata_stats = stats
 
-    #generate an audio dataset & its associated tfrecords
     def generate(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()) -> None:
+        """Generate an audio dataset and its associated tfrecords.
+
+        Args:
+            ex_per_file (int, optional): Target number of examples to have in each tfrecord. Defaults to 2400.
+            n_processes (_type_, optional): Number of processes to use for parallelizing the tfrecord generation job. Defaults to the number of cores reported by the multiprocessing package.
+        """
         #generate on CPU only. If flag isn't set false, GPU likely will OOM
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
@@ -184,8 +189,18 @@ class BaseAudioDataset(ABC):
         with multiprocessing.Pool(n_processes) as pool:
             pool.starmap(self._record_generation_job, job_args)
 
-    #loads dataset from files into train, test, and val datasets
     def load(self, input_size, batch_size, train_split=0.7, val_split=0.15, test_split=0.15, shuffle_buffer=1024):
+        """Loads dataset from files into train, test, and val datasets.
+        THIS FUNCTION IS GOING TO GET REMOVED.
+
+        Args:
+            input_size (_type_): _description_
+            batch_size (_type_): _description_
+            train_split (float, optional): _description_. Defaults to 0.7.
+            val_split (float, optional): _description_. Defaults to 0.15.
+            test_split (float, optional): _description_. Defaults to 0.15.
+            shuffle_buffer (int, optional): _description_. Defaults to 1024.
+        """
         #load info about class from param file
         self._load_params(batch_size, train_split, val_split, test_split)
 
@@ -199,20 +214,42 @@ class BaseAudioDataset(ABC):
         self.validate = self.test.skip(self._val_size).repeat().batch(self._batch_size)
         self.test = self.test.take(self._test_size).repeat().batch(self._batch_size)
 
-    #wrapper to generate TF features for dataset. TF doesn't like train.Feature without the wrapper
-    #copied directly from TF example code
-    def _bytes_feature(self, value):
-        """Returns a bytes_list from a string / byte."""
+    def _bytes_feature(self, value: bytes) -> tf.train.Feature:
+        """Returns a bytes_list from a string / byte.
+        Wrapper to generate TF features for dataset.
+        TF doesn't like train.Feature without the wrapper
+        Copied directly from TF example code
+
+        Args:
+            value (bytes): Bytes string to convert to a bytes list feature.
+
+        Returns:
+            Feature: bytes list feature.
+        """
         if isinstance(value, type(tf.constant(0))):
             value = value.numpy() # BytesList won't unpack a string from an EagerTensor.
         return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
-    #return all tfrecord files matching pattern dir/name#.tfrecord
-    def _get_records(self):
+    def _get_records(self) -> List[str]:
+        """Return all tfrecord files matching pattern dir/name.tfrecord
+
+        Returns:
+            list[str]: List of file paths.
+        """
         return glob.glob(os.path.join(self._dir, "{0}*.tfrecord".format(self._name)))
 
-    #load and read dataset (to be mapped)
-    def _load_map(self, proto_buff, input_size, input_length):
+    def _load_map(self, proto_buff: Any, input_size: int, input_length: int) -> List[Any]:
+        """Load and read dataset (to be mapped)
+
+        Args:
+            proto_buff (any): A string tensor to parse from.
+            input_size (int): _description_
+            input_length (int): _description_
+
+        Returns:
+            list[any]: List of tensors.
+        """
+        # FIXME this function needs to be checked to make sure it makes sense
         #convert from serialized to binary
         feats = {"a_in": tf.io.FixedLenFeature([], tf.string),
                  "a_out": tf.io.FixedLenFeature([], tf.string)}
@@ -284,6 +321,14 @@ class BaseAudioDataset(ABC):
             #     print("Creating TFRecords... {:.1f}%".format(100*i/len(index)), end="\r")
 
     def _load_audio_feature(self, file_path: str) -> tf.train.Feature:
+        """Loads an audio file and converts it to a feature.
+
+        Args:
+            file_path (str): path to the audio file.
+
+        Returns:
+            tf.train.Feature: feature representing the audio file.
+        """
         data, _ = tf.audio.decode_wav(tf.io.read_file(file_path))
 
         #reshape x, y from [t, 1] to [t]
