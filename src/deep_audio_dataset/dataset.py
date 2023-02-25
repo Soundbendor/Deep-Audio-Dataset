@@ -1,7 +1,5 @@
 #paritally based on pytorch code by Alexander Corley
 from abc import ABC, abstractmethod
-import csv
-from functools import partial
 import glob
 import json
 import multiprocessing
@@ -22,7 +20,6 @@ from typing import (
 import wave
 
 import numpy as np
-from sox.core import sox
 import tensorflow as tf
 
 
