@@ -1,7 +1,5 @@
 #paritally based on pytorch code by Alexander Corley
 from abc import ABC, abstractmethod
-import csv
-from functools import partial
 import glob
 import json
 import multiprocessing
@@ -22,39 +20,17 @@ from typing import (
 import wave
 
 import numpy as np
-from sox.core import sox
 import tensorflow as tf
-
-
-'''
-#Intended API for AudioDataset
-#MUST WRAP CODE IN A if __name__ == "__main__" BLOCK DUE TO MULTIPROCESSING OR IT WON'T WORK!
-dataset = AudioDataset(directory, name)
-
-#Generate dataset if it doesn't already exist
-dataset.generate(lower_input_frequency, upper_input_frequency, num_files_per_wave)
-
-#dataset.generate() will call generate_audio() and generate_records()
-#however these will be left as separate functions in case a different
-#audio dataset is to be used, so tfrecord files can still be used
-
-#Load the dataset so we can use them
-dataset.load(input_size, batch_size)
-
-#Access dataset as members of the class
-dataset.train
-dataset.validate
-dataset.test
-'''
 
 
 class BaseAudioDataset(ABC):
     def __init__(self, directory: str, index_file: str, seed: Optional[Any] = None, metadata_file: Optional[str] = None):
-        """
+        """Initialize the BaseAudioDataset.
 
         Args:
-            directory:
+            directory (str): Base directory for the dataset to use.
             index_file (str): Name of the data index file.
+            seed (any, optional): Seed to use for the random number generator.
         """
 
         # create placeholders for datasets
@@ -168,11 +144,13 @@ class BaseAudioDataset(ABC):
 
             self.metadata_stats = stats
 
-
-
-
-    #generate an audio dataset & its associated tfrecords
     def generate(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()) -> None:
+        """Generate an audio dataset and its associated tfrecords.
+
+        Args:
+            ex_per_file (int, optional): Target number of examples to have in each tfrecord. Defaults to 2400.
+            n_processes (_type_, optional): Number of processes to use for parallelizing the tfrecord generation job. Defaults to the number of cores reported by the multiprocessing package.
+        """
         #generate on CPU only. If flag isn't set false, GPU likely will OOM
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
@@ -211,8 +189,18 @@ class BaseAudioDataset(ABC):
         with multiprocessing.Pool(n_processes) as pool:
             pool.starmap(self._record_generation_job, job_args)
 
-    #loads dataset from files into train, test, and val datasets
     def load(self, input_size, batch_size, train_split=0.7, val_split=0.15, test_split=0.15, shuffle_buffer=1024):
+        """Loads dataset from files into train, test, and val datasets.
+        THIS FUNCTION IS GOING TO GET REMOVED.
+
+        Args:
+            input_size (_type_): _description_
+            batch_size (_type_): _description_
+            train_split (float, optional): _description_. Defaults to 0.7.
+            val_split (float, optional): _description_. Defaults to 0.15.
+            test_split (float, optional): _description_. Defaults to 0.15.
+            shuffle_buffer (int, optional): _description_. Defaults to 1024.
+        """
         #load info about class from param file
         self._load_params(batch_size, train_split, val_split, test_split)
 
@@ -226,21 +214,42 @@ class BaseAudioDataset(ABC):
         self.validate = self.test.skip(self._val_size).repeat().batch(self._batch_size)
         self.test = self.test.take(self._test_size).repeat().batch(self._batch_size)
 
-    #wrapper to generate TF features for dataset. TF doesn't like train.Feature without the wrapper
-    #copied directly from TF example code
-    def _bytes_feature(self, value):
-        """Returns a bytes_list from a string / byte."""
+    def _bytes_feature(self, value: bytes) -> tf.train.Feature:
+        """Returns a bytes_list from a string / byte.
+        Wrapper to generate TF features for dataset.
+        TF doesn't like train.Feature without the wrapper
+        Copied directly from TF example code
+
+        Args:
+            value (bytes): Bytes string to convert to a bytes list feature.
+
+        Returns:
+            Feature: bytes list feature.
+        """
         if isinstance(value, type(tf.constant(0))):
             value = value.numpy() # BytesList won't unpack a string from an EagerTensor.
         return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
-    #return all tfrecord files matching pattern dir/name#.tfrecord
-    def _get_records(self):
+    def _get_records(self) -> List[str]:
+        """Return all tfrecord files matching pattern dir/name.tfrecord
+
+        Returns:
+            list[str]: List of file paths.
+        """
         return glob.glob(os.path.join(self._dir, "{0}*.tfrecord".format(self._name)))
 
+    def _load_map(self, proto_buff: Any, input_size: int, input_length: int) -> List[Any]:
+        """Load and read dataset (to be mapped)
 
-    #load and read dataset (to be mapped)
-    def _load_map(self, proto_buff, input_size, input_length):
+        Args:
+            proto_buff (any): A string tensor to parse from.
+            input_size (int): _description_
+            input_length (int): _description_
+
+        Returns:
+            list[any]: List of tensors.
+        """
+        # FIXME this function needs to be checked to make sure it makes sense
         #convert from serialized to binary
         feats = {"a_in": tf.io.FixedLenFeature([], tf.string),
                  "a_out": tf.io.FixedLenFeature([], tf.string)}
@@ -256,68 +265,6 @@ class BaseAudioDataset(ABC):
         d = [tf.reshape(j, [-1, input_size]) for j in d]
 
         return d
-
-    #make directories for audio generation
-    def _make_dirs(self):
-        #if ./_dir/ doesn't exist, make it and all others
-        if not os.path.exists(self._dir):
-            try:
-                os.makedirs(self._dir)
-                os.makedirs(os.path.join(self._dir, "in"))
-                os.makedirs(os.path.join(self._dir, "out"))
-            except OSError as e:
-                raise
-        #if ./_dir/ exists, but in and out don't (ie if remove_wav=True on previous gen)
-        elif not (os.path.exists(os.path.join(self._dir, "in")) or os.path.exists(os.path.join(self._dir, "out"))):
-            try:
-                os.makedirs(os.path.join(self._dir, "in"))
-                os.makedirs(os.path.join(self._dir, "out"))
-            except OSError as e:
-                raise
-
-    #write some information about dataset to json for future loading/human reading
-    # def _write_params(self, n_steps, length, sample_rate, waves, mods):
-    #     params = {}
-
-    #     #for class functionality
-    #     params["size"] = n_steps * len(waves) * len(mods)
-    #     params["length"] = length
-    #     params["sample_rate"] = sample_rate
-
-    #     #write to json
-    #     with open(os.path.join(self._dir, "{0}.txt".format(self._name)), "w") as file:
-    #         json.dump(params, file)
-
-
-    #load some dataset parameters from saved json file
-    # def _load_params(self, batch_size, train_split, val_split, test_split):
-    #     #load params from file and decode json
-    #     file = open(os.path.join(self._dir, "{0}.txt".format(self._name)), "r")
-    #     try:
-    #         params = json.load(file)
-    #     except:
-    #         print("Error loading json!")
-    #         file.close()
-    #         raise
-
-    #     file.close()
-
-    #     #assign values from json
-    #     self._batch_size = batch_size
-    #     self._length = params["length"]
-    #     self._sample_rate = params["sample_rate"]
-    #     self._size = params["size"]
-
-    #     #ensure that the splits sum to 1 and find n_entries per sub-dataset
-    #     if not ((train_split + val_split + test_split) == 1): raise ValueError("Data splits must sum to 1!")
-    #     self._train_size = int(train_split * self._size)
-    #     self._val_size = int(val_split * self._size)
-    #     self._test_size = int(test_split * self._size)
-
-    #     #steps per epoch for each sub-dataset
-    #     self.train_steps = int(self._train_size / self._batch_size)
-    #     self.val_steps = int(self._val_size / self._batch_size)
-    #     self.test_steps = int(self._test_size / self._batch_size)
 
     def _record_generation_job(
         self,
@@ -356,6 +303,14 @@ class BaseAudioDataset(ABC):
             #     print("Creating TFRecords... {:.1f}%".format(100*i/len(index)), end="\r")
 
     def _load_audio_feature(self, file_path: str) -> tf.train.Feature:
+        """Loads an audio file and converts it to a feature.
+
+        Args:
+            file_path (str): path to the audio file.
+
+        Returns:
+            tf.train.Feature: feature representing the audio file.
+        """
         data, _ = tf.audio.decode_wav(tf.io.read_file(file_path))
 
         #reshape x, y from [t, 1] to [t]
@@ -365,15 +320,6 @@ class BaseAudioDataset(ABC):
         bytes_data = np.asarray(data).astype(np.float16).tobytes()
 
         return self._bytes_feature(bytes_data)
-
-    #the opposite of generate_audio(), removes all wav files after generation for storage reasons
-    def _remove_wav(self):
-        try:
-            shutil.rmtree(os.path.join(self._dir, "in"))
-            shutil.rmtree(os.path.join(self._dir, "out"))
-            os.remove(os.path.join(self._dir, self._name))
-        except OSError as e:
-            print("Error: {0} - {1}".format(e.filename, e.strerror))
 
     @abstractmethod
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
@@ -407,6 +353,7 @@ class BaseAudioDataset(ABC):
                     training_set.append([x["a_in"], x["a_out"]])
 
             yield tf.data.Dataset.from_tensor_slices(training_set), tf.data.Dataset.from_tensor_slices(test_set), value
+
 
 class AudioDataset(BaseAudioDataset):
 
