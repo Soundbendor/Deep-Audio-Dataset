@@ -23,28 +23,6 @@ import numpy as np
 import tensorflow as tf
 
 
-'''
-#Intended API for AudioDataset
-#MUST WRAP CODE IN A if __name__ == "__main__" BLOCK DUE TO MULTIPROCESSING OR IT WON'T WORK!
-dataset = AudioDataset(directory, name)
-
-#Generate dataset if it doesn't already exist
-dataset.generate(lower_input_frequency, upper_input_frequency, num_files_per_wave)
-
-#dataset.generate() will call generate_audio() and generate_records()
-#however these will be left as separate functions in case a different
-#audio dataset is to be used, so tfrecord files can still be used
-
-#Load the dataset so we can use them
-dataset.load(input_size, batch_size)
-
-#Access dataset as members of the class
-dataset.train
-dataset.validate
-dataset.test
-'''
-
-
 class BaseAudioDataset(ABC):
     def __init__(self, directory: str, index_file: str, seed: Optional[Any] = None, metadata_file: Optional[str] = None):
         """
