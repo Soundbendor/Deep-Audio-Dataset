@@ -25,11 +25,12 @@ import tensorflow as tf
 
 class BaseAudioDataset(ABC):
     def __init__(self, directory: str, index_file: str, seed: Optional[Any] = None, metadata_file: Optional[str] = None):
-        """
+        """Initialize the BaseAudioDataset.
 
         Args:
-            directory:
+            directory (str): Base directory for the dataset to use.
             index_file (str): Name of the data index file.
+            seed (any, optional): Seed to use for the random number generator.
         """
 
         # create placeholders for datasets
