@@ -168,9 +168,6 @@ class BaseAudioDataset(ABC):
 
             self.metadata_stats = stats
 
-
-
-
     #generate an audio dataset & its associated tfrecords
     def generate(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()) -> None:
         #generate on CPU only. If flag isn't set false, GPU likely will OOM
@@ -237,7 +234,6 @@ class BaseAudioDataset(ABC):
     #return all tfrecord files matching pattern dir/name#.tfrecord
     def _get_records(self):
         return glob.glob(os.path.join(self._dir, "{0}*.tfrecord".format(self._name)))
-
 
     #load and read dataset (to be mapped)
     def _load_map(self, proto_buff, input_size, input_length):
@@ -363,6 +359,7 @@ class BaseAudioDataset(ABC):
                     training_set.append([x["a_in"], x["a_out"]])
 
             yield tf.data.Dataset.from_tensor_slices(training_set), tf.data.Dataset.from_tensor_slices(test_set), value
+
 
 class AudioDataset(BaseAudioDataset):
 
