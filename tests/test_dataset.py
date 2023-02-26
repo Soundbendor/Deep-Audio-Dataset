@@ -30,174 +30,126 @@ def ten_wav_files(tmp_path):
 def test_audio_dataset_generate(two_wav_files):
     base_path = two_wav_files[1]
     ad = AudioDataset(f"{base_path}/test_data", "test.txt")
-    ad.generate(ex_per_file=1)
 
-    assert(Path(f"{base_path}/test_data/test.txt0.tfrecord").exists())
-    assert(Path(f"{base_path}/test_data/test.txt1.tfrecord").exists())
+    ad._ensure_generated_records_directory()
+    ds = ad._save_generated_dataset("test", [i for i in range(2)])
 
-    checksums = set()
-
-    with open(f"{base_path}/test_data/test.txt0.tfrecord", "rb") as f:
-        checksums.add(md5(f.read()).hexdigest())
-
-    with open(f"{base_path}/test_data/test.txt1.tfrecord", "rb") as f:
-        checksums.add(md5(f.read()).hexdigest())
-
-    print(checksums)
-
-    assert len(checksums) in [1, 2]
-
-    if len(checksums) == 1:
-        expected_checksums = [{'75102dcae42f1e2de7630693e7318724'}]
-    else:
-        expected_checksums = [{'75102dcae42f1e2de7630693e7318724', '0300107e8a25e9f92c3e4f845ed3272e'}]
-
-    assert checksums in expected_checksums
+    for x, y in ds.as_numpy_iterator():
+        assert len(x) == 441000
+        assert len(y) == 441000
+        assert list(x) == list(y)
 
 
-def test_audio_dataset_fail_different_lengths():
-    from deep_audio_dataset import AudioDataset
+def test_audio_dataset_fail_different_lengths(tmp_path):
+    for directory in ["in", "out"]:
+        os.makedirs(f"{tmp_path}/test_data/{directory}")
 
-    os.makedirs("test_data/in", exist_ok=False)
+        with open(f"{tmp_path}/test_data/{directory}/test0.wav", "wb") as file:
+            data = generate_wav_data(1)
+            file.write(data)
 
-    with open("test_data/in/test0.wav", "wb") as file:
-        data = generate_wav_data(1)
-        file.write(data)
+        with open(f"{tmp_path}/test_data/{directory}/test1.wav", "wb") as file:
+            data = generate_wav_data(2)
+            file.write(data)
 
-    with open("test_data/in/test1.wav", "wb") as file:
-        data = generate_wav_data(2)
-        file.write(data)
-
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
-
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.writelines("test0.wav,test0.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
     assert(str(e.value) == "Multiple lengths detected (seconds): 1.0, 2.0")
 
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/in/test1.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
 
-
-def test_audio_dataset_fail_do_not_exist():
+def test_audio_dataset_fail_do_not_exist(tmp_path):
     from deep_audio_dataset import AudioDataset
 
-    os.makedirs("test_data/in", exist_ok=True)
+    os.makedirs(f"{tmp_path}/test_data/in")
+    os.makedirs(f"{tmp_path}/test_data/out")
 
-    with open("test_data/in/test0.wav", "wb") as file:
+    with open(f"{tmp_path}/test_data/in/test0.wav", "wb") as file:
         data = generate_wav_data(1)
         file.write(data)
 
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
-
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.writelines("test0.wav,test1.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
-    assert(str(e.value) == "The following files do not exist: test_data/in/test1.wav")
-
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
+    assert(str(e.value) == f"The following files do not exist: {tmp_path}/test_data/in/test1.wav")
 
 
-def test_audio_dataset_fail_multiple_sampling_rates():
-    from deep_audio_dataset import AudioDataset
+def test_audio_dataset_fail_multiple_sampling_rates(tmp_path):
+    for directory in ["in", "out"]:
+        os.makedirs(f"{tmp_path}/test_data/{directory}")
 
-    os.makedirs("test_data/in", exist_ok=True)
+        with open(f"{tmp_path}/test_data/{directory}/test0.wav", "wb") as file:
+            data = generate_wav_data(1)
+            file.write(data)
 
-    with open("test_data/in/test0.wav", "wb") as file:
-        data = generate_wav_data(1)
-        file.write(data)
+        with open(f"{tmp_path}/test_data/{directory}/test1.wav", "wb") as file:
+            data = generate_wav_data(1, sampling_rate=88200)
+            file.write(data)
 
-    with open("test_data/in/test1.wav", "wb") as file:
-        data = generate_wav_data(1, sampling_rate=88200)
-        file.write(data)
-
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
-
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.writelines("test0.wav,test0.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
     assert(str(e.value) == "Multiple sampling rates detected: 44100, 88200")
 
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/in/test1.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
 
+def test_audio_dataset_fail_bits_per_sample(tmp_path):
+    os.makedirs(f"{tmp_path}/test_data/in", exist_ok=True)
+    os.makedirs(f"{tmp_path}/test_data/out", exist_ok=True)
 
-def test_audio_dataset_fail_bits_per_sample():
-    from deep_audio_dataset import AudioDataset
+    for directory in ["in", "out"]:
+        with open(f"{tmp_path}/test_data/{directory}/test0.wav", "wb") as file:
+            data = generate_wav_data(1)
+            file.write(data)
 
-    os.makedirs("test_data/in", exist_ok=True)
+        with open(f"{tmp_path}/test_data/in/test1.wav", "wb") as file:
+            data = generate_wav_data(1, bits_per_sample=32)
+            file.write(data)
 
-    with open("test_data/in/test0.wav", "wb") as file:
-        data = generate_wav_data(1)
-        file.write(data)
-
-    with open("test_data/in/test1.wav", "wb") as file:
-        data = generate_wav_data(1, bits_per_sample=32)
-        file.write(data)
-
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
-
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.write("test0.wav,test0.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
     assert(str(e.value) == "Multiple bits per sample detected: 16, 32")
 
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/in/test1.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
 
+def test_audio_dataset_fail_multiple_channels(tmp_path):
+    os.makedirs(f"{tmp_path}/test_data/in")
+    os.makedirs(f"{tmp_path}/test_data/out")
 
-def test_audio_dataset_fail_multiple_channels():
-    from deep_audio_dataset import AudioDataset
-
-    os.makedirs("test_data/in", exist_ok=True)
-
-    with open("test_data/in/test0.wav", "wb") as file:
+    with open(f"{tmp_path}/test_data/in/test0.wav", "wb") as file:
         data = generate_wav_data(1)
         file.write(data)
 
-    with open("test_data/in/test1.wav", "wb") as file:
+    with open(f"{tmp_path}/test_data/in/test1.wav", "wb") as file:
         data = generate_wav_data(1, num_channels=2)
         file.write(data)
 
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
+    with open(f"{tmp_path}/test_data/out/test0.wav", "wb") as file:
+        data = generate_wav_data(1)
+        file.write(data)
 
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/out/test1.wav", "wb") as file:
+        data = generate_wav_data(1, num_channels=2)
+        file.write(data)
+
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.write("test0.wav,test0.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
     assert(str(e.value) == "Multiple number of channels detected: 1, 2")
-
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/in/test1.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
 
 
 def test_multilabel_classification(tmp_path):
@@ -212,13 +164,11 @@ def test_multilabel_classification(tmp_path):
 
 
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
-    dataset.generate()
+    dataset._ensure_generated_records_directory()
+    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(1)]).as_numpy_iterator()]
 
-    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([], tf.float32))
-
-    out_result = [x["a_out"].numpy() for x in parsed_ds]
-
-    assert out_result == [1.0]
+    assert len(actual_results) == 1
+    assert list(actual_results[0][1]) == [1.0]
 
 
 def test_multilabel_classification_two_labels(tmp_path):
@@ -233,13 +183,11 @@ def test_multilabel_classification_two_labels(tmp_path):
 
 
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
-    dataset.generate()
+    dataset._ensure_generated_records_directory()
+    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(1)]).as_numpy_iterator()]
 
-    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([2], tf.float32))
-
-    out_result = [x["a_out"].numpy() for x in parsed_ds]
-
-    assert all(out_result[0] == [0.0, 1.0])
+    assert len(actual_results) == 1
+    assert all(actual_results[0][1] == [0.0, 1.0])
 
 
 def test_multilabel_classification_two_samples(tmp_path):
@@ -254,18 +202,17 @@ def test_multilabel_classification_two_samples(tmp_path):
         file.write(data)
 
     with open(f"{tmp_path}/test.txt", "w") as f:
-        f.writelines(["test0.wav,01", "\ntest1.wav,10"])
+        f.write("test0.wav,01\ntest1.wav,10")
 
 
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
-    dataset.generate()
+    dataset._ensure_generated_records_directory()
+    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(2)]).as_numpy_iterator()]
+    actual_results = sorted(actual_results, key=lambda x: x[0][0])
 
-    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([dataset.label_length], tf.float32))
-
-    out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
-
-    assert all(out_result[0] == [0.0, 1.0])
-    assert all(out_result[1] == [1.0, 0.0])
+    assert len(actual_results) == 2
+    assert all(actual_results[0][1] == [0.0, 1.0])
+    assert all(actual_results[1][1] == [1.0, 0.0])
 
 
 def test_dataset_with_metadata(tmp_path):
@@ -292,35 +239,18 @@ def test_dataset_with_metadata(tmp_path):
         json.dump(metadata, f)
 
     dataset = AudioDataset(tmp_path, "test.txt", metadata_file="metadata.txt")
-    dataset.generate()
 
     assert dataset.metadata is not None
     assert dataset.metadata["test0.wav"] == {"artist": "Artist0"}
     assert dataset.metadata_stats["fields"] == ["artist"]
     assert dataset.metadata_stats["values"]["artist"] == ["Artist0"]
 
-    feature_description = {
-        'a_in': tf.io.FixedLenFeature([], tf.string),
-        'a_out': tf.io.FixedLenFeature([], tf.string),
-        'metadata': tf.io.VarLenFeature(tf.string)
-    }
-
-    def _parser(x):
-        return tf.io.parse_single_example(x, feature_description)
-
-    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
-    parsed_ds = raw_ds.map(_parser)
-
-    recovered_metadata = [json.loads(x["metadata"].values.numpy()[0].decode()) for x in parsed_ds]
-
-    assert recovered_metadata == [metadata["test0.wav"]]
-
 
 def test_dataset_kfold_metadata(tmp_path):
     os.makedirs(f"{tmp_path}/in", exist_ok=False)
     os.makedirs(f"{tmp_path}/out", exist_ok=False)
 
-    for i in range(10):
+    for i in range(9):
         with open(f"{tmp_path}/in/test{i}.wav", "wb") as file:
             data = generate_wav_data(1)
             file.write(data)
@@ -330,23 +260,25 @@ def test_dataset_kfold_metadata(tmp_path):
             file.write(data)
 
     with open(f"{tmp_path}/test.txt", "w") as f:
-        f.writelines([f"test{i}.wav,test{i}.wav\n" for i in range(10)])
+        f.writelines([f"test{i}.wav,test{i}.wav\n" for i in range(9)])
 
     with open(f"{tmp_path}/metadata.txt", "w") as f:
-        metadata = {f"test{i}.wav": {"artist": f"Artist{i % 2}"} for i in range(10)}
+        metadata = {f"test{i}.wav": {"artist": f"Artist{i % 3}"} for i in range(9)}
         json.dump(metadata, f)
 
     dataset = AudioDataset(tmp_path, "test.txt", metadata_file="metadata.txt")
-    dataset.generate()
 
     meta_values = []
 
     for train, test, meta_value in dataset.kfold_on_metadata("artist"):
+        assert len(list(train.as_numpy_iterator())) == 6
+        assert len(list(test.as_numpy_iterator())) == 3
         meta_values.append(meta_value)
 
-    assert len(meta_values) == 2
+    assert len(meta_values) == 3
     assert "Artist0" in meta_values
     assert "Artist1" in meta_values
+    assert "Artist2" in meta_values
 
 
 def test_regression_dataset(tmp_path):
@@ -361,15 +293,12 @@ def test_regression_dataset(tmp_path):
         f.writelines([f"test{i}.wav,1.0,0.0\n" for i in range(1)])
 
     dataset = RegressionAudioDataset(tmp_path, "test.txt")
-    dataset.generate()
-
     assert dataset.n_ == 2
 
-    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([2], tf.float32))
+    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(1)]).as_numpy_iterator()]
 
-    out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
-
-    assert all(out_result[0] == [1.0, 0.0])
+    assert len(actual_results) == 1
+    assert all(actual_results[0][1] == [1.0, 0.0])
 
 
 def test_train_test_split(ten_wav_files):

@@ -51,8 +51,8 @@ def generate_wav_data(
 
     data_chunk_tag = bytes.fromhex("64 61 74 61")  # DATA
     data_chunk_size = (data_length_samples * bytes_per_sample).to_bytes(4, "little")
-    # data = generate_sin_wav(frequency, data_length_seconds, samples_per_second=sampling_rate, bits_per_sample=bits_per_sample).tobytes()
-    data = np.array([frequency] * (sampling_rate * data_length_seconds)).astype(np.float16).tobytes()
+    data = generate_sin_wav(frequency, data_length_seconds, samples_per_second=sampling_rate, bits_per_sample=bits_per_sample).tobytes()
+    # data = np.array([frequency] * (sampling_rate * data_length_seconds)).astype(np.float16).tobytes()
 
     riff_chunk = riff_chunk_tag + riff_chunk_size
     wave_chunk = wave_chunk_tag
@@ -70,8 +70,8 @@ def generate_wav_files(n: int, base_path: str) -> List[str]:
 
     for i in range(n):
         filename = f"{base_path}/test_data/in/test{i}.wav"
-        # freq = 440 * (i + 1)
-        freq = 0.0
+        freq = 440 * (i + 1)
+        # freq = 0.0
         with open(filename, "wb") as file:
             data = generate_wav_data(10, freq)
             file.write(data)
