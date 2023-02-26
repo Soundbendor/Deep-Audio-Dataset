@@ -22,6 +22,11 @@ def two_wav_files(tmp_path):
     return generate_wav_files(2, tmp_path), tmp_path
 
 
+@pytest.fixture
+def ten_wav_files(tmp_path):
+    return generate_wav_files(10, tmp_path), tmp_path
+
+
 def test_audio_dataset_generate(two_wav_files):
     base_path = two_wav_files[1]
     ad = AudioDataset(f"{base_path}/test_data", "test.txt")
@@ -355,7 +360,6 @@ def test_regression_dataset(tmp_path):
     with open(f"{tmp_path}/test.txt", "w") as f:
         f.writelines([f"test{i}.wav,1.0,0.0\n" for i in range(1)])
 
-
     dataset = RegressionAudioDataset(tmp_path, "test.txt")
     dataset.generate()
 
@@ -366,3 +370,28 @@ def test_regression_dataset(tmp_path):
     out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
 
     assert all(out_result[0] == [1.0, 0.0])
+
+
+def test_train_test_split(ten_wav_files):
+    file_list, base_path = ten_wav_files
+
+    dataset = AudioDataset(os.path.join(base_path, "test_data"), file_list[-1].split("/")[-1], "nora")
+
+    train, test = dataset.train_test_split(0.8)
+
+    assert isinstance(train, tf.data.Dataset)
+    assert isinstance(test, tf.data.Dataset)
+
+    train_set = {(tuple(x[0]), tuple(x[1])) for x in train.as_numpy_iterator()}
+    test_set = {(tuple(x[0]), tuple(x[1])) for x in test.as_numpy_iterator()}
+
+    assert len(train_set) == 8
+    assert len(test_set) == 2
+
+    assert len(train_set.intersection(test_set)) == 0
+
+    for x, y in list(train_set):
+        assert x == y
+
+    for x, y in list(test_set):
+        assert x == y
