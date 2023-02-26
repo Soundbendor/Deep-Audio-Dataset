@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import partial
 import json
-import multiprocessing
 import os
 from pathlib import Path
 import random
@@ -82,8 +81,6 @@ class BaseAudioDataset(ABC):
 
         train_indices, test_indices = self._generate_shuffled_indices(train_size, test_size)
 
-        self._ensure_generated_records_directory()
-
         suffix = datetime.now().strftime("%Y%m%d%H%M%S")
         train_set = self._save_generated_dataset(f"train_{suffix}", train_indices)
         test_set = self._save_generated_dataset(f"test_{suffix}", test_indices)
@@ -120,6 +117,17 @@ class BaseAudioDataset(ABC):
                 v for k, v in folds.items() if k != fold
             ])
             yield train_set, test_set, fold
+
+    def analyze_index_outputs(self, outputs: List[str]) -> None:
+        return
+
+    @abstractmethod
+    def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
+        pass
+
+    @abstractmethod
+    def output_feature_type(self):
+        pass
 
     def _load_index(self) -> None:
         num_examples, inputs, outputs = self._parse_index()
@@ -204,9 +212,6 @@ class BaseAudioDataset(ABC):
 
         return
 
-    def analyze_index_outputs(self, outputs: List[str]) -> None:
-        return
-
     def _load_metadata(self) -> Optional[List[dict]]:
         # check if metadata exists, and if so then load it for the indices
         if self._metadata_file:
@@ -234,33 +239,10 @@ class BaseAudioDataset(ABC):
 
             self.metadata_stats = stats
 
-    def _bytes_feature(self, value: bytes) -> tf.train.Feature:
-        """Returns a bytes_list from a string / byte.
-        Wrapper to generate TF features for dataset.
-        TF doesn't like train.Feature without the wrapper
-        Copied directly from TF example code
-
-        Args:
-            value (bytes): Bytes string to convert to a bytes list feature.
-
-        Returns:
-            Feature: bytes list feature.
-        """
-        if isinstance(value, type(tf.constant(0))):
-            value = value.numpy() # BytesList won't unpack a string from an EagerTensor.
-        return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
-
     def _load_audio_feature(self, file_path: str) -> tf.train.Feature:
         data, _ = tf.audio.decode_wav(tf.io.read_file(file_path))
         data = tf.squeeze(data)
         return tf.train.Feature(float_list=tf.train.FloatList(value=data.numpy()))
-
-    @abstractmethod
-    def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
-        pass
-
-    def _output_feature_type(self):
-        return tf.io.FixedLenFeature([], tf.string)
 
     def _ensure_generated_records_directory(self) -> None:
         if not os.path.exists(os.path.join(self._dir, "generated_records")):
@@ -309,7 +291,7 @@ class BaseAudioDataset(ABC):
 
         feature_description = {
             'a_in': tf.io.FixedLenFeature((self.input_len,), tf.float32),
-            'a_out': self._output_feature_type()
+            'a_out': self.output_feature_type()
         }
 
         def _parser(x, key):
@@ -321,20 +303,6 @@ class BaseAudioDataset(ABC):
         out_ds = raw_ds.map(partial(_parser, key="a_out"))
 
         return tf.data.Dataset.zip((in_ds, out_ds))
-
-    def _load_index(self) -> Tuple[int, List[str], List[str]]:
-        with open(os.path.join(self._dir, self._name)) as f:
-            lines = list(f.readlines())
-
-        num_examples = len(lines)
-
-        split_lines = [[s.strip() for s in line.split(",")] for line in lines]
-
-        inputs = [line[0] for line in split_lines]
-        outputs = [line[1:] for line in split_lines]
-
-        return num_examples, inputs, outputs
-
 
     def _get_indices_for_metadata(self, field: str, value: Any) -> List[int]:
         indices = []
@@ -353,7 +321,7 @@ class AudioDataset(BaseAudioDataset):
         results = self._analyze_files([os.path.join(self._dir, "out", output[0]) for output in outputs])
         self.output_len_ = int(list(results["lengths"])[0] * list(results["sampling_rates"])[0])
 
-    def _output_feature_type(self):
+    def output_feature_type(self):
         return tf.io.FixedLenFeature((self.output_len_,), tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
@@ -367,7 +335,7 @@ class MultilabelClassificationAudioDataset(BaseAudioDataset):
         self.label_length = len(outputs[0][0])
         return
 
-    def _output_feature_type(self):
+    def output_feature_type(self):
         return tf.io.FixedLenFeature([self.label_length], tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
@@ -379,7 +347,7 @@ class RegressionAudioDataset(BaseAudioDataset):
     def analyze_index_outputs(self, outputs: List[List[str]]) -> None:
         self.n_ = len(outputs[0])
 
-    def _output_feature_type(self):
+    def output_feature_type(self):
         return tf.io.FixedLenFeature((self.n_,), tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
