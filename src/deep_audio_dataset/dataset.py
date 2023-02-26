@@ -49,10 +49,79 @@ class BaseAudioDataset(ABC):
         self.input_len = None
         self.num_examples = None
 
-        self.load_index()
-        self.load_metadata()
+        self._load_index()
+        self._load_metadata()
 
-    def load_index(self) -> None:
+    def train_test_split(
+        self,
+        train_size: Optional[float] = None,
+        test_size: Optional[float] = None
+    ) -> Tuple[tf.data.Dataset, tf.data.Dataset]:
+        """Split the dataset into two disjoint subsets: train set and test set.
+
+        While the split does not have to cover the entire dataset, the sizes cannot be larger than the whole dataset (i.e. this must be true: train_size + test_size <= 0).
+        At least one value, train_size or test_size, must be assigned a value or an exception will be raised.
+
+        Args:
+            train_size (float, optional): The fraction of the total dataset to use for training. Either train_size or test_size must be set. Defaults to None.
+            test_size (float, optional): The fraction of the total dataset to use for testing. Either test_size of train_size must be set. Defaults to None.
+
+        Returns:
+            tuple[Dataset, Dataset]: Tuple of (train, test) datasets.
+
+        Raises:
+            ValueError: If train_size and test_size are both None.
+        """
+        if train_size is None and test_size is None:
+            raise ValueError("Either train_size or test_size must be assigned a value. Both were None.")
+
+        if train_size is None:
+            train_size = 1.0 - test_size
+        elif test_size is None:
+            test_size = 1.0 - train_size
+
+        train_indices, test_indices = self._generate_shuffled_indices(train_size, test_size)
+
+        self._ensure_generated_records_directory()
+
+        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        train_set = self._save_generated_dataset(f"train_{suffix}", train_indices)
+        test_set = self._save_generated_dataset(f"test_{suffix}", test_indices)
+
+        return train_set, test_set
+
+    def kfold_on_metadata(self, metadata_field: str) -> Tuple[tf.train.Feature, tf.train.Feature, str]:
+        """Generate a fold based validation on a metadata field.
+
+        For each unique value associated with the metadata field, a different train-test split will be generated.
+        The test set will include all examples that have the same metadata value.
+        The train set will include the remainder of the examples.
+        No attempts to balance the size of the folds are made, so some training may result in very skewed sizes.
+        The order of the training set is shuffled so that examples with different metadata values are interleaved throughout the dataset.
+
+        Args:
+            metadata_field (str): The metadata field to perform cross validation on.
+
+        Yields:
+            Iterator[Tuple[tf.train.Feature, tf.train.Feature, str]]: Tuples of (train_set, test_set, fold_value) where fold_value is the current value being held out for the test set.
+        """
+        # create a tfrecord for each fold
+        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        folds = {
+            fold: self._save_generated_dataset(
+                f"{suffix}_{fold}.tfrecord",
+                self._get_indices_for_metadata(metadata_field, fold)
+            ) for fold in self.metadata_stats["values"][metadata_field]
+        }
+
+        for fold in self.metadata_stats["values"][metadata_field]:
+            test_set = folds[fold]
+            train_set = tf.data.Dataset.sample_from_datasets([
+                v for k, v in folds.items() if k != fold
+            ])
+            yield train_set, test_set, fold
+
+    def _load_index(self) -> None:
         num_examples, inputs, outputs = self._parse_index()
 
         self.inputs = inputs
@@ -109,7 +178,7 @@ class BaseAudioDataset(ABC):
 
         return analysis
 
-    def _validate_audio_file_set(self, file_analysis) -> None:
+    def _validate_audio_file_set(self, file_analysis: dict) -> None:
         """Validate that the analysis results from a set of wav files shows consistent properties.
 
         Args:
@@ -138,7 +207,7 @@ class BaseAudioDataset(ABC):
     def analyze_index_outputs(self, outputs: List[str]) -> None:
         return
 
-    def load_metadata(self) -> Optional[List[dict]]:
+    def _load_metadata(self) -> Optional[List[dict]]:
         # check if metadata exists, and if so then load it for the indices
         if self._metadata_file:
             with open(os.path.join(self._dir, self._metadata_file)) as f:
@@ -197,7 +266,7 @@ class BaseAudioDataset(ABC):
         if not os.path.exists(os.path.join(self._dir, "generated_records")):
             os.mkdir(os.path.join(self._dir, "generated_records"))
 
-    def _generate_shuffled_indices(self, train_size: float, test_size) -> Tuple[List[int], List[int]]:
+    def _generate_shuffled_indices(self, train_size: float, test_size: float) -> Tuple[List[int], List[int]]:
         # round uses banker's rounding
         num_train_indices = min(round(self.num_examples * train_size), self.num_examples)
         num_test_indices = min(round(self.num_examples * test_size), self.num_examples)
@@ -266,43 +335,6 @@ class BaseAudioDataset(ABC):
 
         return num_examples, inputs, outputs
 
-    def train_test_split(
-        self,
-        train_size: Optional[float] = None,
-        test_size: Optional[float] = None
-    ) -> Tuple[tf.data.Dataset, tf.data.Dataset]:
-        """Split the dataset into two disjoint subsets: train set and test set.
-
-        While the split does not have to cover the entire dataset, the sizes cannot be larger than the whole dataset (i.e. this must be true: train_size + test_size <= 0).
-        At least one value, train_size or test_size, must be assigned a value or an exception will be raised.
-
-        Args:
-            train_size (float, optional): The fraction of the total dataset to use for training. Either train_size or test_size must be set. Defaults to None.
-            test_size (float, optional): The fraction of the total dataset to use for testing. Either test_size of train_size must be set. Defaults to None.
-
-        Returns:
-            tuple[Dataset, Dataset]: Tuple of (train, test) datasets.
-
-        Raises:
-            ValueError: If train_size and test_size are both None.
-        """
-        if train_size is None and test_size is None:
-            raise ValueError("Either train_size or test_size must be assigned a value. Both were None.")
-
-        if train_size is None:
-            train_size = 1.0 - test_size
-        elif test_size is None:
-            test_size = 1.0 - train_size
-
-        train_indices, test_indices = self._generate_shuffled_indices(train_size, test_size)
-
-        self._ensure_generated_records_directory()
-
-        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
-        train_set = self._save_generated_dataset(f"train_{suffix}", train_indices)
-        test_set = self._save_generated_dataset(f"test_{suffix}", test_indices)
-
-        return train_set, test_set
 
     def _get_indices_for_metadata(self, field: str, value: Any) -> List[int]:
         indices = []
@@ -312,23 +344,6 @@ class BaseAudioDataset(ABC):
                 indices.append(i)
         self._rng.shuffle(indices)
         return indices
-
-    def kfold_on_metadata(self, metadata_field: str) -> Tuple[tf.train.Feature, tf.train.Feature, str]:
-        # create a tfrecord for each fold
-        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
-        folds = {
-            fold: self._save_generated_dataset(
-                f"{suffix}_{fold}.tfrecord",
-                self._get_indices_for_metadata(metadata_field, fold)
-            ) for fold in self.metadata_stats["values"][metadata_field]
-        }
-
-        for fold in self.metadata_stats["values"][metadata_field]:
-            test_set = folds[fold]
-            train_set = tf.data.Dataset.sample_from_datasets([
-                v for k, v in folds.items() if k != fold
-            ])
-            yield train_set, test_set, fold
 
 
 class AudioDataset(BaseAudioDataset):
