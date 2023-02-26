@@ -2,17 +2,14 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import partial
-import glob
 import json
 import multiprocessing
 import os
 from pathlib import Path
 import random
-import shutil
 import time
 from typing import (
     Any,
-    Iterable,
     List,
     Mapping,
     Optional,
@@ -112,7 +109,7 @@ class BaseAudioDataset(ABC):
         return analysis
 
     def _validate_audio_file_set(self, file_analysis) -> None:
-        """Validate that all of the wav files have consistent properties.
+        """Validate that the analysis results from a set of wav files shows consistent properties.
 
         Args:
             file_analysis (dict): Dictionary of different properties that were analyzed from some collection of audio files.
@@ -166,51 +163,6 @@ class BaseAudioDataset(ABC):
                 stats["values"][field] = list(stats["values"][field])
 
             self.metadata_stats = stats
-
-    def _generate(self, ex_per_file=2400, n_processes=multiprocessing.cpu_count()) -> None:
-        """Generate an audio dataset and its associated tfrecords.
-
-        Args:
-            ex_per_file (int, optional): Target number of examples to have in each tfrecord. Defaults to 2400.
-            n_processes (_type_, optional): Number of processes to use for parallelizing the tfrecord generation job. Defaults to the number of cores reported by the multiprocessing package.
-        """
-        #generate on CPU only. If flag isn't set false, GPU likely will OOM
-        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
-        #get list of all audio files from index file
-        with open(os.path.join(self._dir, self._name)) as f:
-            index = [tuple(line.strip().split(",")) for line in f.readlines()]
-
-        inputs = [x[0] for x in index]
-        outputs = [",".join(x[1:]) for x in index]
-
-        self.analyze_index_outputs(outputs)
-
-        # don't check values if they don't end in "wav"
-        # FIXME this is pretty spotty behaviour, need a more robust system of inspecting inputs and outputs in BaseAudioDataset
-        input_file_paths = [Path(self._dir).joinpath("in/" + f) for i in index for f in i if len(f) > 0 and f.endswith("wav")]
-
-        self._validate_audio_file_set(input_file_paths)
-
-        self.load_metadata()
-
-        #see if number of processes are excessive. if so, adjust to appropriate amt
-        if np.ceil(len(index)/ex_per_file) < n_processes:
-            n_processes = int(np.ceil(len(index)/ex_per_file))
-
-        #shuffle the indicies to guarentee randomness across files
-        self._rng.shuffle(index)
-
-        # example_chunks = np.array_split(index, ex_per_file)
-        if ex_per_file == 1:
-            example_chunks = [[x] for x in index]
-        else:
-            example_chunks = [x for x in np.array_split(index, ex_per_file) if len(x) > 0]
-
-        job_args = [(x, i, [self.metadata[index_name[0]] for index_name in x] if self.metadata else []) for i, x in enumerate(example_chunks) if len(x) > 0]
-
-        with multiprocessing.Pool(n_processes) as pool:
-            pool.starmap(self._record_generation_job, job_args)
 
     def _bytes_feature(self, value: bytes) -> tf.train.Feature:
         """Returns a bytes_list from a string / byte.
