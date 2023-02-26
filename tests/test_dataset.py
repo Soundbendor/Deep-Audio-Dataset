@@ -30,29 +30,14 @@ def ten_wav_files(tmp_path):
 def test_audio_dataset_generate(two_wav_files):
     base_path = two_wav_files[1]
     ad = AudioDataset(f"{base_path}/test_data", "test.txt")
-    ad.generate(ex_per_file=1)
 
-    assert(Path(f"{base_path}/test_data/test.txt0.tfrecord").exists())
-    assert(Path(f"{base_path}/test_data/test.txt1.tfrecord").exists())
+    ad._ensure_generated_records_directory()
+    ds = ad._save_generated_dataset("test", [i for i in range(2)])
 
-    checksums = set()
-
-    with open(f"{base_path}/test_data/test.txt0.tfrecord", "rb") as f:
-        checksums.add(md5(f.read()).hexdigest())
-
-    with open(f"{base_path}/test_data/test.txt1.tfrecord", "rb") as f:
-        checksums.add(md5(f.read()).hexdigest())
-
-    print(checksums)
-
-    assert len(checksums) in [1, 2]
-
-    if len(checksums) == 1:
-        expected_checksums = [{'75102dcae42f1e2de7630693e7318724'}]
-    else:
-        expected_checksums = [{'75102dcae42f1e2de7630693e7318724', '0300107e8a25e9f92c3e4f845ed3272e'}]
-
-    assert checksums in expected_checksums
+    for x, y in ds.as_numpy_iterator():
+        assert len(x) == 441000
+        assert len(y) == 441000
+        assert list(x) == list(y)
 
 
 def test_audio_dataset_fail_different_lengths(tmp_path):
@@ -179,13 +164,11 @@ def test_multilabel_classification(tmp_path):
 
 
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
-    dataset.generate()
+    dataset._ensure_generated_records_directory()
+    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(1)]).as_numpy_iterator()]
 
-    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([], tf.float32))
-
-    out_result = [x["a_out"].numpy() for x in parsed_ds]
-
-    assert out_result == [1.0]
+    assert len(actual_results) == 1
+    assert list(actual_results[0][1]) == [1.0]
 
 
 def test_multilabel_classification_two_labels(tmp_path):
@@ -200,13 +183,11 @@ def test_multilabel_classification_two_labels(tmp_path):
 
 
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
-    dataset.generate()
+    dataset._ensure_generated_records_directory()
+    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(1)]).as_numpy_iterator()]
 
-    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([2], tf.float32))
-
-    out_result = [x["a_out"].numpy() for x in parsed_ds]
-
-    assert all(out_result[0] == [0.0, 1.0])
+    assert len(actual_results) == 1
+    assert all(actual_results[0][1] == [0.0, 1.0])
 
 
 def test_multilabel_classification_two_samples(tmp_path):
@@ -221,18 +202,17 @@ def test_multilabel_classification_two_samples(tmp_path):
         file.write(data)
 
     with open(f"{tmp_path}/test.txt", "w") as f:
-        f.writelines(["test0.wav,01", "\ntest1.wav,10"])
+        f.write("test0.wav,01\ntest1.wav,10")
 
 
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
-    dataset.generate()
+    dataset._ensure_generated_records_directory()
+    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(2)]).as_numpy_iterator()]
+    actual_results = sorted(actual_results, key=lambda x: x[0][0])
 
-    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([dataset.label_length], tf.float32))
-
-    out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
-
-    assert all(out_result[0] == [0.0, 1.0])
-    assert all(out_result[1] == [1.0, 0.0])
+    assert len(actual_results) == 2
+    assert all(actual_results[0][1] == [0.0, 1.0])
+    assert all(actual_results[1][1] == [1.0, 0.0])
 
 
 def test_dataset_with_metadata(tmp_path):
