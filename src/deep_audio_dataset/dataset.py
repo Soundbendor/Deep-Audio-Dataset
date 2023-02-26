@@ -221,6 +221,7 @@ class BaseAudioDataset(ABC):
         return train_indices, test_indices
 
     def _save_generated_dataset(self, name: str, indices: List[int]) -> tf.data.Dataset:
+        self._ensure_generated_records_directory()
         writer = tf.io.TFRecordWriter(os.path.join(self._dir, "generated_records", f"{name}.tfrecord"))
 
         for i in indices:
@@ -303,31 +304,31 @@ class BaseAudioDataset(ABC):
 
         return train_set, test_set
 
+    def _get_indices_for_metadata(self, field: str, value: Any) -> List[int]:
+        indices = []
+        for i in range(self.num_examples):
+            input = self.inputs[i]
+            if self.metadata[input][field] == value:
+                indices.append(i)
+        self._rng.shuffle(indices)
+        return indices
+
     def kfold_on_metadata(self, metadata_field: str) -> Tuple[tf.train.Feature, tf.train.Feature, str]:
-        feature_description = {
-            'a_in': tf.io.FixedLenFeature([], tf.string),
-            'a_out': self._output_feature_type(),
-            'metadata': tf.io.VarLenFeature(tf.string)
+        # create a tfrecord for each fold
+        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        folds = {
+            fold: self._save_generated_dataset(
+                f"{suffix}_{fold}.tfrecord",
+                self._get_indices_for_metadata(metadata_field, fold)
+            ) for fold in self.metadata_stats["values"][metadata_field]
         }
 
-        def _parser(x):
-            return tf.io.parse_single_example(x, feature_description)
-
-        raw_ds = tf.data.TFRecordDataset(list(Path(self._dir).glob("*.tfrecord")))
-        parsed_ds = raw_ds.map(_parser)
-
-        for value in self.metadata_stats["values"][metadata_field]:
-            # grab the tfrecords and map them with a filter
-            training_set = []
-            test_set = []
-            for x in parsed_ds:
-                metadata = json.loads(x["metadata"].values.numpy()[0].decode())
-                if metadata[metadata_field] == value:
-                    test_set.append([x["a_in"], x["a_out"]])
-                else:
-                    training_set.append([x["a_in"], x["a_out"]])
-
-            yield tf.data.Dataset.from_tensor_slices(training_set), tf.data.Dataset.from_tensor_slices(test_set), value
+        for fold in self.metadata_stats["values"][metadata_field]:
+            test_set = folds[fold]
+            train_set = tf.data.Dataset.sample_from_datasets([
+                v for k, v in folds.items() if k != fold
+            ])
+            yield train_set, test_set, fold
 
 
 class AudioDataset(BaseAudioDataset):

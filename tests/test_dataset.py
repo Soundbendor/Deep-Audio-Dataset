@@ -250,7 +250,7 @@ def test_dataset_kfold_metadata(tmp_path):
     os.makedirs(f"{tmp_path}/in", exist_ok=False)
     os.makedirs(f"{tmp_path}/out", exist_ok=False)
 
-    for i in range(10):
+    for i in range(9):
         with open(f"{tmp_path}/in/test{i}.wav", "wb") as file:
             data = generate_wav_data(1)
             file.write(data)
@@ -260,23 +260,25 @@ def test_dataset_kfold_metadata(tmp_path):
             file.write(data)
 
     with open(f"{tmp_path}/test.txt", "w") as f:
-        f.writelines([f"test{i}.wav,test{i}.wav\n" for i in range(10)])
+        f.writelines([f"test{i}.wav,test{i}.wav\n" for i in range(9)])
 
     with open(f"{tmp_path}/metadata.txt", "w") as f:
-        metadata = {f"test{i}.wav": {"artist": f"Artist{i % 2}"} for i in range(10)}
+        metadata = {f"test{i}.wav": {"artist": f"Artist{i % 3}"} for i in range(9)}
         json.dump(metadata, f)
 
     dataset = AudioDataset(tmp_path, "test.txt", metadata_file="metadata.txt")
-    dataset.generate()
 
     meta_values = []
 
     for train, test, meta_value in dataset.kfold_on_metadata("artist"):
+        assert len(list(train.as_numpy_iterator())) == 6
+        assert len(list(test.as_numpy_iterator())) == 3
         meta_values.append(meta_value)
 
-    assert len(meta_values) == 2
+    assert len(meta_values) == 3
     assert "Artist0" in meta_values
     assert "Artist1" in meta_values
+    assert "Artist2" in meta_values
 
 
 def test_regression_dataset(tmp_path):
