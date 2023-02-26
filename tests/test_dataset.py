@@ -293,15 +293,12 @@ def test_regression_dataset(tmp_path):
         f.writelines([f"test{i}.wav,1.0,0.0\n" for i in range(1)])
 
     dataset = RegressionAudioDataset(tmp_path, "test.txt")
-    dataset.generate()
-
     assert dataset.n_ == 2
 
-    parsed_ds = load_and_parse_tfrecords(tmp_path, tf.io.FixedLenFeature([2], tf.float32))
+    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(1)]).as_numpy_iterator()]
 
-    out_result = sorted([x["a_out"].numpy() for x in parsed_ds], key=lambda x: list(x))
-
-    assert all(out_result[0] == [1.0, 0.0])
+    assert len(actual_results) == 1
+    assert all(actual_results[0][1] == [1.0, 0.0])
 
 
 def test_train_test_split(ten_wav_files):
