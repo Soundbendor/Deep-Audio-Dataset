@@ -55,149 +55,116 @@ def test_audio_dataset_generate(two_wav_files):
     assert checksums in expected_checksums
 
 
-def test_audio_dataset_fail_different_lengths():
-    from deep_audio_dataset import AudioDataset
+def test_audio_dataset_fail_different_lengths(tmp_path):
+    for directory in ["in", "out"]:
+        os.makedirs(f"{tmp_path}/test_data/{directory}")
 
-    os.makedirs("test_data/in", exist_ok=False)
+        with open(f"{tmp_path}/test_data/{directory}/test0.wav", "wb") as file:
+            data = generate_wav_data(1)
+            file.write(data)
 
-    with open("test_data/in/test0.wav", "wb") as file:
-        data = generate_wav_data(1)
-        file.write(data)
+        with open(f"{tmp_path}/test_data/{directory}/test1.wav", "wb") as file:
+            data = generate_wav_data(2)
+            file.write(data)
 
-    with open("test_data/in/test1.wav", "wb") as file:
-        data = generate_wav_data(2)
-        file.write(data)
-
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
-
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.writelines("test0.wav,test0.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
     assert(str(e.value) == "Multiple lengths detected (seconds): 1.0, 2.0")
 
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/in/test1.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
 
-
-def test_audio_dataset_fail_do_not_exist():
+def test_audio_dataset_fail_do_not_exist(tmp_path):
     from deep_audio_dataset import AudioDataset
 
-    os.makedirs("test_data/in", exist_ok=True)
+    os.makedirs(f"{tmp_path}/test_data/in")
+    os.makedirs(f"{tmp_path}/test_data/out")
 
-    with open("test_data/in/test0.wav", "wb") as file:
+    with open(f"{tmp_path}/test_data/in/test0.wav", "wb") as file:
         data = generate_wav_data(1)
         file.write(data)
 
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
-
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.writelines("test0.wav,test1.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
-    assert(str(e.value) == "The following files do not exist: test_data/in/test1.wav")
-
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
+    assert(str(e.value) == f"The following files do not exist: {tmp_path}/test_data/in/test1.wav")
 
 
-def test_audio_dataset_fail_multiple_sampling_rates():
-    from deep_audio_dataset import AudioDataset
+def test_audio_dataset_fail_multiple_sampling_rates(tmp_path):
+    for directory in ["in", "out"]:
+        os.makedirs(f"{tmp_path}/test_data/{directory}")
 
-    os.makedirs("test_data/in", exist_ok=True)
+        with open(f"{tmp_path}/test_data/{directory}/test0.wav", "wb") as file:
+            data = generate_wav_data(1)
+            file.write(data)
 
-    with open("test_data/in/test0.wav", "wb") as file:
-        data = generate_wav_data(1)
-        file.write(data)
+        with open(f"{tmp_path}/test_data/{directory}/test1.wav", "wb") as file:
+            data = generate_wav_data(1, sampling_rate=88200)
+            file.write(data)
 
-    with open("test_data/in/test1.wav", "wb") as file:
-        data = generate_wav_data(1, sampling_rate=88200)
-        file.write(data)
-
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
-
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.writelines("test0.wav,test0.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
     assert(str(e.value) == "Multiple sampling rates detected: 44100, 88200")
 
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/in/test1.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
 
+def test_audio_dataset_fail_bits_per_sample(tmp_path):
+    os.makedirs(f"{tmp_path}/test_data/in", exist_ok=True)
+    os.makedirs(f"{tmp_path}/test_data/out", exist_ok=True)
 
-def test_audio_dataset_fail_bits_per_sample():
-    from deep_audio_dataset import AudioDataset
+    for directory in ["in", "out"]:
+        with open(f"{tmp_path}/test_data/{directory}/test0.wav", "wb") as file:
+            data = generate_wav_data(1)
+            file.write(data)
 
-    os.makedirs("test_data/in", exist_ok=True)
+        with open(f"{tmp_path}/test_data/in/test1.wav", "wb") as file:
+            data = generate_wav_data(1, bits_per_sample=32)
+            file.write(data)
 
-    with open("test_data/in/test0.wav", "wb") as file:
-        data = generate_wav_data(1)
-        file.write(data)
-
-    with open("test_data/in/test1.wav", "wb") as file:
-        data = generate_wav_data(1, bits_per_sample=32)
-        file.write(data)
-
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
-
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.write("test0.wav,test0.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
     assert(str(e.value) == "Multiple bits per sample detected: 16, 32")
 
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/in/test1.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
 
+def test_audio_dataset_fail_multiple_channels(tmp_path):
+    os.makedirs(f"{tmp_path}/test_data/in")
+    os.makedirs(f"{tmp_path}/test_data/out")
 
-def test_audio_dataset_fail_multiple_channels():
-    from deep_audio_dataset import AudioDataset
-
-    os.makedirs("test_data/in", exist_ok=True)
-
-    with open("test_data/in/test0.wav", "wb") as file:
+    with open(f"{tmp_path}/test_data/in/test0.wav", "wb") as file:
         data = generate_wav_data(1)
         file.write(data)
 
-    with open("test_data/in/test1.wav", "wb") as file:
+    with open(f"{tmp_path}/test_data/in/test1.wav", "wb") as file:
         data = generate_wav_data(1, num_channels=2)
         file.write(data)
 
-    with open("test_data/test.txt", "w") as f:
-        # this is not as intended (the leading comma)
-        f.writelines(["test0.wav,", "test1.wav,"])
+    with open(f"{tmp_path}/test_data/out/test0.wav", "wb") as file:
+        data = generate_wav_data(1)
+        file.write(data)
 
-    ad = AudioDataset("test_data", "test.txt")
+    with open(f"{tmp_path}/test_data/out/test1.wav", "wb") as file:
+        data = generate_wav_data(1, num_channels=2)
+        file.write(data)
+
+    with open(f"{tmp_path}/test_data/test.txt", "w") as f:
+        f.write("test0.wav,test0.wav\ntest1.wav,test1.wav")
 
     with pytest.raises(ValueError) as e:
-        ad.generate()
+        AudioDataset(f"{tmp_path}/test_data", "test.txt")
 
     assert(str(e.value) == "Multiple number of channels detected: 1, 2")
-
-    os.remove("test_data/in/test0.wav")
-    os.remove("test_data/in/test1.wav")
-    os.remove("test_data/test.txt")
-    shutil.rmtree("test_data")
 
 
 def test_multilabel_classification(tmp_path):
