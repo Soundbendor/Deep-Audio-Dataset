@@ -50,6 +50,7 @@ class BaseAudioDataset(ABC):
         self.num_examples = None
 
         self.load_index()
+        self.load_metadata()
 
     def load_index(self) -> None:
         num_examples, inputs, outputs = self._parse_index()

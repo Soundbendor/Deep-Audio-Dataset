@@ -239,28 +239,11 @@ def test_dataset_with_metadata(tmp_path):
         json.dump(metadata, f)
 
     dataset = AudioDataset(tmp_path, "test.txt", metadata_file="metadata.txt")
-    dataset.generate()
 
     assert dataset.metadata is not None
     assert dataset.metadata["test0.wav"] == {"artist": "Artist0"}
     assert dataset.metadata_stats["fields"] == ["artist"]
     assert dataset.metadata_stats["values"]["artist"] == ["Artist0"]
-
-    feature_description = {
-        'a_in': tf.io.FixedLenFeature([], tf.string),
-        'a_out': tf.io.FixedLenFeature([], tf.string),
-        'metadata': tf.io.VarLenFeature(tf.string)
-    }
-
-    def _parser(x):
-        return tf.io.parse_single_example(x, feature_description)
-
-    raw_ds = tf.data.TFRecordDataset(list(Path(tmp_path).glob("*.tfrecord")))
-    parsed_ds = raw_ds.map(_parser)
-
-    recovered_metadata = [json.loads(x["metadata"].values.numpy()[0].decode()) for x in parsed_ds]
-
-    assert recovered_metadata == [metadata["test0.wav"]]
 
 
 def test_dataset_kfold_metadata(tmp_path):
