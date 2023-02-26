@@ -1,5 +1,7 @@
 #paritally based on pytorch code by Alexander Corley
 from abc import ABC, abstractmethod
+from datetime import datetime
+from functools import partial
 import glob
 import json
 import multiprocessing
@@ -32,12 +34,6 @@ class BaseAudioDataset(ABC):
             index_file (str): Name of the data index file.
             seed (any, optional): Seed to use for the random number generator.
         """
-
-        # create placeholders for datasets
-        self.train = None
-        self.validate = None
-        self.test = None
-
         if seed is None:
             self._rng = random.Random(time.time())
         else:
@@ -50,6 +46,8 @@ class BaseAudioDataset(ABC):
         self._metadata_file = metadata_file
         self.metadata = None
         self.metadata_stats = None
+
+        self.input_len_ = None
 
     @abstractmethod
     def generate(self, *args, **kwargs) -> None:
@@ -302,24 +300,29 @@ class BaseAudioDataset(ABC):
             # if progress:
             #     print("Creating TFRecords... {:.1f}%".format(100*i/len(index)), end="\r")
 
+    # def _load_audio_feature(self, file_path: str) -> tf.train.Feature:
+    #     """Loads an audio file and converts it to a feature.
+
+    #     Args:
+    #         file_path (str): path to the audio file.
+
+    #     Returns:
+    #         tf.train.Feature: feature representing the audio file.
+    #     """
+    #     data, _ = tf.audio.decode_wav(tf.io.read_file(file_path))
+
+    #     #reshape x, y from [t, 1] to [t]
+    #     data = tf.squeeze(data)
+
+    #     #tensorflow can only store float32, but WAV files are 16bit. use np methods to store as 16bit
+    #     bytes_data = np.asarray(data).astype(np.float16).tobytes()
+
+    #     return self._bytes_feature(bytes_data)
+
     def _load_audio_feature(self, file_path: str) -> tf.train.Feature:
-        """Loads an audio file and converts it to a feature.
-
-        Args:
-            file_path (str): path to the audio file.
-
-        Returns:
-            tf.train.Feature: feature representing the audio file.
-        """
         data, _ = tf.audio.decode_wav(tf.io.read_file(file_path))
-
-        #reshape x, y from [t, 1] to [t]
         data = tf.squeeze(data)
-
-        #tensorflow can only store float32, but WAV files are 16bit. use np methods to store as 16bit
-        bytes_data = np.asarray(data).astype(np.float16).tobytes()
-
-        return self._bytes_feature(bytes_data)
+        return tf.train.Feature(float_list=tf.train.FloatList(value=data.numpy()))
 
     @abstractmethod
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
@@ -327,6 +330,126 @@ class BaseAudioDataset(ABC):
 
     def _output_feature_type(self):
         return tf.io.FixedLenFeature([], tf.string)
+
+    def _ensure_generated_records_directory(self) -> None:
+        if not os.path.exists(os.path.join(self._dir, "generated_records")):
+            os.mkdir(os.path.join(self._dir, "generated_records"))
+
+    def _generate_shuffled_indices(self, num_examples: int, train_size: float, test_size) -> Tuple[List[int], List[int]]:
+        # round uses banker's rounding
+        num_train_indices = min(round(num_examples * train_size), num_examples)
+        num_test_indices = min(round(num_examples * test_size), num_examples)
+
+        if num_test_indices == 0:
+            num_test_indices = 1
+            num_train_indices -= 1
+        elif num_train_indices == 0:
+            num_train_indices = 1
+            num_test_indices -= 1
+
+        if num_train_indices + num_test_indices > num_examples:
+            raise ValueError("Train and test split overlap.")
+
+        shuffled_indices = [i for i in range(num_examples)]
+        self._rng.shuffle(shuffled_indices)
+
+        train_indices = shuffled_indices[:num_train_indices]
+        test_indices = shuffled_indices[-num_test_indices:]
+
+        return train_indices, test_indices
+
+    def _save_generated_dataset(self, name: str, inputs: List[str], outputs: List[str], indices: List[int]) -> tf.data.Dataset:
+        writer = tf.io.TFRecordWriter(os.path.join(self._dir, "generated_records", f"{name}.tfrecord"))
+
+        for i in indices:
+            input_file_name = inputs[i]
+            output_info = outputs[i]
+
+            input_file_path = os.path.join(self._dir, "in", input_file_name)
+
+            feature = {
+                "a_in": self._load_audio_feature(input_file_path),
+                "a_out": self.load_output_feature(output_info)
+            }
+
+            example = tf.train.Example(features=tf.train.Features(feature=feature))
+            writer.write(example.SerializeToString())
+
+        feature_description = {
+            'a_in': tf.io.FixedLenFeature((self.input_len_,), tf.float32),
+            'a_out': self._output_feature_type()
+        }
+
+        def _parser(x, key):
+            result = tf.io.parse_single_example(x, feature_description)
+            return result[key]
+
+        raw_ds = tf.data.TFRecordDataset(os.path.join(self._dir, "generated_records", f"{name}.tfrecord"))
+        in_ds = raw_ds.map(partial(_parser, key="a_in"))
+        out_ds = raw_ds.map(partial(_parser, key="a_out"))
+
+        return tf.data.Dataset.zip((in_ds, out_ds))
+
+    def _load_index(self) -> Tuple[int, List[str], List[str]]:
+        with open(os.path.join(self._dir, self._name)) as f:
+            lines = list(f.readlines())
+
+        num_examples = len(lines)
+
+        split_lines = [[s.strip() for s in line.split(",")] for line in lines]
+
+        inputs = [line[0] for line in split_lines]
+        outputs = [line[1:] for line in split_lines]
+
+        return num_examples, inputs, outputs
+
+
+    def train_test_split(
+        self,
+        train_size: Optional[float] = None,
+        test_size: Optional[float] = None
+    ) -> Tuple[tf.data.Dataset, tf.data.Dataset]:
+        """Split the dataset into two disjoint subsets: train set and test set.
+
+        While the split does not have to cover the entire dataset, the sizes cannot be larger than the whole dataset (i.e. this must be true: train_size + test_size <= 0).
+        At least one value, train_size or test_size, must be assigned a value or an exception will be raised.
+
+        Args:
+            train_size (float, optional): The fraction of the total dataset to use for training. Either train_size or test_size must be set. Defaults to None.
+            test_size (float, optional): The fraction of the total dataset to use for testing. Either test_size of train_size must be set. Defaults to None.
+
+        Returns:
+            tuple[Dataset, Dataset]: Tuple of (train, test) datasets.
+
+        Raises:
+            ValueError: If train_size and test_size are both None.
+        """
+        if train_size is None and test_size is None:
+            raise ValueError("Either train_size or test_size must be assigned a value. Both were None.")
+
+        if train_size is None:
+            train_size = 1.0 - test_size
+        elif test_size is None:
+            test_size = 1.0 - train_size
+
+        # calculate the indices
+        # find how many examples there are
+        num_examples, inputs, outputs = self._load_index()
+
+        results = self._analyze_files([os.path.join(self._dir, "in", input) for input in inputs])
+        self.input_len_ = int(list(results["lengths"])[0] * list(results["sampling_rates"])[0])
+
+        self.analyze_index_outputs(outputs)
+
+        train_indices, test_indices = self._generate_shuffled_indices(num_examples, train_size, test_size)
+
+        self._ensure_generated_records_directory()
+
+        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        train_set = self._save_generated_dataset(f"train_{suffix}", inputs, outputs, train_indices)
+        test_set = self._save_generated_dataset(f"test_{suffix}", inputs, outputs, test_indices)
+
+        return train_set, test_set
 
     def kfold_on_metadata(self, metadata_field: str) -> Tuple[tf.train.Feature, tf.train.Feature, str]:
         feature_description = {
@@ -357,6 +480,13 @@ class BaseAudioDataset(ABC):
 
 class AudioDataset(BaseAudioDataset):
 
+    def analyze_index_outputs(self, outputs: List[List[str]]) -> None:
+        results = self._analyze_files([os.path.join(self._dir, "out", output[0]) for output in outputs])
+        self.output_len_ = int(list(results["lengths"])[0] * list(results["sampling_rates"])[0])
+
+    def _output_feature_type(self):
+        return tf.io.FixedLenFeature((self.output_len_,), tf.float32)
+
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
         output_file_path = os.path.join(self._dir, "out", output_index[0])
         return self._load_audio_feature(output_file_path)
@@ -364,8 +494,8 @@ class AudioDataset(BaseAudioDataset):
 
 class MultilabelClassificationAudioDataset(BaseAudioDataset):
 
-    def analyze_index_outputs(self, outputs: List[str]) -> None:
-        self.label_length = len(outputs[0])
+    def analyze_index_outputs(self, outputs: List[List[str]]) -> None:
+        self.label_length = len(outputs[0][0])
         return
 
     def _output_feature_type(self):
@@ -381,9 +511,9 @@ class RegressionAudioDataset(BaseAudioDataset):
         self.n_ = len(outputs[0].split(","))
 
     def _output_feature_type(self):
-        return tf.io.FixedLenFeature([self.n_], tf.float32)
+        return tf.io.FixedLenFeature((self.n_,), tf.float32)
 
-    def load_output_feature(self, output_index: str) -> tf.train.Feature:
+    def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
         return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(target) for target in output_index], dtype="float32")))
 
     def kfold_on_metadata(self, metadata_field: str):
