@@ -22,7 +22,7 @@ classifiers = [
 "Bug Tracker" = "https://github.com/Soundbendor/Deep-Audio-Dataset/issues"
 
 [tool.ruff]
-select = ['ANN', 'E', 'D', 'F', 'N', 'W']
+select = ['A', 'ANN', 'B', 'E', 'D', 'F', 'N', 'S', 'W']
 line-length = 120
 ignore-init-module-imports = true
 extend-ignore = [

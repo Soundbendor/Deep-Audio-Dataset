@@ -175,7 +175,7 @@ class BaseAudioDataset(ABC):
         self.outputs = outputs
         self.num_examples = num_examples
 
-        results = self._analyze_files([os.path.join(self._dir, "in", input) for input in inputs])
+        results = self._analyze_files([os.path.join(self._dir, "in", input_file) for input_file in inputs])
         self._validate_audio_file_set(results)
         self.input_len = int(list(results["lengths"])[0] * list(results["sampling_rates"])[0])
 
@@ -350,8 +350,8 @@ class BaseAudioDataset(ABC):
     def _get_indices_for_metadata(self, field: str, value: Any) -> List[int]:
         indices = []
         for i in range(self.num_examples):
-            input = self.inputs[i]
-            if self.metadata[input][field] == value:
+            input_file = self.inputs[i]
+            if self.metadata[input_file][field] == value:
                 indices.append(i)
         self._rng.shuffle(indices)
         return indices
