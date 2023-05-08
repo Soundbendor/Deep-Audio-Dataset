@@ -156,7 +156,7 @@ class BaseAudioDataset(ABC):
         Returns:
             tf.train.Feature: The output feature that represents the example.
         """
-        pass
+        ...
 
     @abstractmethod
     def output_feature_type(self) -> Any:
@@ -166,7 +166,7 @@ class BaseAudioDataset(ABC):
         Returns:
             Any: The feature type and configuration of the output feature.
         """
-        pass
+        ...
 
     def _load_index(self) -> None:
         num_examples, inputs, outputs = self._parse_index()
