@@ -22,7 +22,13 @@ import tensorflow as tf
 
 
 class BaseAudioDataset(ABC):
-    def __init__(self, directory: str, index_file: str, seed: Optional[Any] = None, metadata_file: Optional[str] = None):
+    def __init__(
+            self,
+            directory: str,
+            index_file: str,
+            seed: Optional[Any] = None,
+            metadata_file: Optional[str] = None
+        ) -> None:
         """Initialize the BaseAudioDataset.
 
         Args:
@@ -58,12 +64,15 @@ class BaseAudioDataset(ABC):
     ) -> Tuple[tf.data.Dataset, tf.data.Dataset]:
         """Split the dataset into two disjoint subsets: train set and test set.
 
-        While the split does not have to cover the entire dataset, the sizes cannot be larger than the whole dataset (i.e. this must be true: train_size + test_size <= 0).
+        While the split does not have to cover the entire dataset,
+        the sizes cannot be larger than the whole dataset (i.e. this must be true: train_size + test_size <= 1).
         At least one value, train_size or test_size, must be assigned a value or an exception will be raised.
 
         Args:
-            train_size (float, optional): The fraction of the total dataset to use for training. Either train_size or test_size must be set. Defaults to None.
-            test_size (float, optional): The fraction of the total dataset to use for testing. Either test_size of train_size must be set. Defaults to None.
+            train_size (float, optional): The fraction of the total dataset to use for training.
+                Either train_size or test_size must be set. Defaults to None.
+            test_size (float, optional): The fraction of the total dataset to use for testing.
+                Either test_size of train_size must be set. Defaults to None.
 
         Returns:
             tuple[Dataset, Dataset]: Tuple of (train, test) datasets.
@@ -94,13 +103,15 @@ class BaseAudioDataset(ABC):
         The test set will include all examples that have the same metadata value.
         The train set will include the remainder of the examples.
         No attempts to balance the size of the folds are made, so some training may result in very skewed sizes.
-        The order of the training set is shuffled so that examples with different metadata values are interleaved throughout the dataset.
+        The order of the training set is shuffled so that
+        examples with different metadata values are interleaved throughout the dataset.
 
         Args:
             metadata_field (str): The metadata field to perform cross validation on.
 
         Yields:
-            Iterator[Tuple[tf.train.Feature, tf.train.Feature, str]]: Tuples of (train_set, test_set, fold_value) where fold_value is the current value being held out for the test set.
+            Iterator[Tuple[tf.train.Feature, tf.train.Feature, str]]: Tuples of (train_set, test_set, fold_value)
+                where fold_value is the current value being held out for the test set.
         """
         # create a tfrecord for each fold
         suffix = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -190,10 +201,12 @@ class BaseAudioDataset(ABC):
         """Validate that the analysis results from a set of wav files shows consistent properties.
 
         Args:
-            file_analysis (dict): Dictionary of different properties that were analyzed from some collection of audio files.
+            file_analysis (dict): Dictionary of different properties that were analyzed
+                from some collection of audio files.
 
         Raises:
-            ValueError: If one of the files does not exist or if multiple sampling rates, bits per sample, number of channels, or lengths are detected.
+            ValueError: If one of the files does not exist or if multiple sampling rates,
+                bits per sample, number of channels, or lengths are detected.
         """
         if not file_analysis["all_exist"]:
             raise ValueError(f"The following files do not exist: {', '.join(sorted(file_analysis['do_not_exist']))}")
@@ -227,7 +240,9 @@ class BaseAudioDataset(ABC):
             for index in metadata:
                 for field, value in metadata[index].items():
                     if not isinstance(value, str):
-                        raise Exception(f"Only string values are allowed in metadata. Found {value} with type {type(value)}")
+                        raise Exception(
+                            f"Only string values are allowed in metadata. Found {value} with type {type(value)}"
+                        )
                     stats["fields"].add(field)
                     if field not in stats["values"]:
                         stats["values"][field] = set()
@@ -339,7 +354,9 @@ class MultilabelClassificationAudioDataset(BaseAudioDataset):
         return tf.io.FixedLenFeature([self.label_length], tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
-        return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index[0]], dtype="float32")))
+        return tf.train.Feature(
+            float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index[0]], dtype="float32"))
+        )
 
 
 class RegressionAudioDataset(BaseAudioDataset):
@@ -351,4 +368,6 @@ class RegressionAudioDataset(BaseAudioDataset):
         return tf.io.FixedLenFeature((self.n_,), tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
-        return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(target) for target in output_index], dtype="float32")))
+        return tf.train.Feature(
+            float_list=tf.train.FloatList(value=np.array([float(target) for target in output_index], dtype="float32"))
+        )
