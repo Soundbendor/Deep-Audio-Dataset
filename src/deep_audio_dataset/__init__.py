@@ -2,7 +2,7 @@
 from .dataset import AudioDataset, MultilabelClassificationAudioDataset, RegressionAudioDataset
 
 __all__ = [
-    AudioDataset,
-    MultilabelClassificationAudioDataset,
-    RegressionAudioDataset,
+    'AudioDataset',
+    'MultilabelClassificationAudioDataset',
+    'RegressionAudioDataset',
 ]

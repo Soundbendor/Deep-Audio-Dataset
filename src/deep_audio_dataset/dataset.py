@@ -204,8 +204,7 @@ class BaseAudioDataset(ABC):
             "do_not_exist": [],
         }
 
-        for file in files:
-            file = Path(file)
+        for file in (Path(f) for f in files):
             if file.exists():
                 with open(file, "rb") as f:
                     wav_file = wave.open(f)
@@ -250,8 +249,6 @@ class BaseAudioDataset(ABC):
         if len(file_analysis["lengths"]) > 1:
             lengths = ", ".join([str(x) for x in sorted(file_analysis["lengths"])])
             raise ValueError(f"Multiple lengths detected (seconds): {lengths}")
-
-        return
 
     def _load_metadata(self) -> Optional[List[dict]]:
         # check if metadata exists, and if so then load it for the indices
