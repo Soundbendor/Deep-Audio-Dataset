@@ -306,7 +306,7 @@ class BaseAudioDataset(ABC):
         if num_train_indices + num_test_indices > self.num_examples:
             raise ValueError("Train and test split overlap.")
 
-        shuffled_indices = [i for i in range(self.num_examples)]
+        shuffled_indices = list(range(self.num_examples))
         self._rng.shuffle(shuffled_indices)
 
         train_indices = shuffled_indices[:num_train_indices]
