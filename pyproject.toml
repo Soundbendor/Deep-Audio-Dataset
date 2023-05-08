@@ -20,3 +20,6 @@ classifiers = [
 [project.urls]
 "Homepage" = "https://github.com/Soundbendor/Deep-Audio-Dataset"
 "Bug Tracker" = "https://github.com/Soundbendor/Deep-Audio-Dataset/issues"
+
+[tool.ruff]
+line-length = 120
