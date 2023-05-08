@@ -22,10 +22,15 @@ classifiers = [
 "Bug Tracker" = "https://github.com/Soundbendor/Deep-Audio-Dataset/issues"
 
 [tool.ruff]
-select = ['E', 'D', 'F', 'N', 'W']
+select = ['ANN', 'E', 'D', 'F', 'N', 'W']
 line-length = 120
 ignore-init-module-imports = true
-extend-ignore = ['D203', 'D212']
+extend-ignore = [
+    'ANN101',  # type annotation on self
+    'ANN401',  # use typing.Any
+    'D203',
+    'D212'
+]
 
 [tool.ruff.pydocstyle]
 convention = "google"

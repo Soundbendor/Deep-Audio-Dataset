@@ -337,7 +337,7 @@ class BaseAudioDataset(ABC):
             'a_out': self.output_feature_type()
         }
 
-        def _parser(x, key):
+        def _parser(x: tf.train.Example, key: str) -> tf.train.Example:
             result = tf.io.parse_single_example(x, feature_description)
             return result[key]
 
@@ -370,7 +370,7 @@ class AudioDataset(BaseAudioDataset):
         results = self._analyze_files([os.path.join(self._dir, "out", output[0]) for output in outputs])
         self.output_len_ = int(list(results["lengths"])[0] * list(results["sampling_rates"])[0])
 
-    def output_feature_type(self):
+    def output_feature_type(self) -> Any:
         """Feature type of AudioDataset is a float32 FixedLenFeature of shape (output_len_,)."""
         return tf.io.FixedLenFeature((self.output_len_,), tf.float32)
 
@@ -397,7 +397,7 @@ class MultilabelClassificationAudioDataset(BaseAudioDataset):
         """
         self.label_length = len(outputs[0][0])
 
-    def output_feature_type(self):
+    def output_feature_type(self) -> Any:
         """Feature type of MultilabelClassificationAudioDataset is a FixedLenFeature of shape (label_length,)."""
         return tf.io.FixedLenFeature([self.label_length], tf.float32)
 
@@ -428,7 +428,7 @@ class RegressionAudioDataset(BaseAudioDataset):
         """
         self.n_ = len(outputs[0])
 
-    def output_feature_type(self):
+    def output_feature_type(self) -> Any:
         """Feature type of RegressionAudioDataset is a float32 FixedLenFeature of shape (n_,)."""
         return tf.io.FixedLenFeature((self.n_,), tf.float32)
 
