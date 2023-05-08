@@ -1,4 +1,4 @@
-#paritally based on pytorch code by Alexander Corley
+"""Basic Audio Dataset classes."""
 from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import partial
@@ -22,6 +22,8 @@ import tensorflow as tf
 
 
 class BaseAudioDataset(ABC):
+    """Base class for audio datasets."""
+
     def __init__(
             self,
             directory: str,
@@ -35,6 +37,8 @@ class BaseAudioDataset(ABC):
             directory (str): Base directory for the dataset to use.
             index_file (str): Name of the data index file.
             seed (any, optional): Seed to use for the random number generator.
+            metadata_file (str, optional): Name of the file that contains metadata about the dataset.
+                If None, no metadata will be loaded. Defaults to None.
         """
         if seed is None:
             self._rng = random.Random(time.time())
@@ -130,14 +134,38 @@ class BaseAudioDataset(ABC):
             yield train_set, test_set, fold
 
     def analyze_index_outputs(self, outputs: List[str]) -> None:
+        """
+        Analyze the outputs of the index file.
+
+        This method is called after the index file is loaded.
+        It can be used to analyze the outputs of the index file and store any relevant information.
+
+        Args:
+            outputs (List[str]): List of output values taken from the index file.
+        """
         return
 
     @abstractmethod
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
+        """
+        Using the output index, load the output feature that represents the example.
+
+        Args:
+            output_index (List[str]): List of output values taken from the index file.
+
+        Returns:
+            tf.train.Feature: The output feature that represents the example.
+        """
         pass
 
     @abstractmethod
-    def output_feature_type(self):
+    def output_feature_type(self) -> Any:
+        """
+        Feature type of the output feature.
+
+        Returns:
+            Any: The feature type and configuration of the output feature.
+        """
         pass
 
     def _load_index(self) -> None:
@@ -330,44 +358,90 @@ class BaseAudioDataset(ABC):
 
 
 class AudioDataset(BaseAudioDataset):
+    """Dataset for sequence to sequence audio data."""
 
     def analyze_index_outputs(self, outputs: List[List[str]]) -> None:
-        print(outputs)
+        """
+        Analyze the outputs for each index to ensure they are all the same length and sampling rate.
+
+        Args:
+            outputs (List[str]): List of output file names for each index.
+        """
         results = self._analyze_files([os.path.join(self._dir, "out", output[0]) for output in outputs])
         self.output_len_ = int(list(results["lengths"])[0] * list(results["sampling_rates"])[0])
 
     def output_feature_type(self):
+        """Feature type of AudioDataset is a float32 FixedLenFeature of shape (output_len_,)."""
         return tf.io.FixedLenFeature((self.output_len_,), tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
+        """
+        Load the output feature for a given index.
+
+        Args:
+            output_index (List[str]): Output file name to load.
+        """
         output_file_path = os.path.join(self._dir, "out", output_index[0])
         return self._load_audio_feature(output_file_path)
 
 
 class MultilabelClassificationAudioDataset(BaseAudioDataset):
+    """Dataset for multilabel classification audio data."""
 
     def analyze_index_outputs(self, outputs: List[List[str]]) -> None:
+        """
+        Analyze the outputs for each index to get the label length and ensure they are all the same.
+
+        Args:
+            outputs (List[List[str]]): List of label classifications.
+        """
         self.label_length = len(outputs[0][0])
-        return
 
     def output_feature_type(self):
+        """Feature type of MultilabelClassificationAudioDataset is a FixedLenFeature of shape (label_length,)."""
         return tf.io.FixedLenFeature([self.label_length], tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
+        """
+        Load an output feature for the given index.
+
+        Args:
+            output_index (List[str]): List of label classifications.
+
+        Returns:
+            tf.train.Feature: Feature for the given index.
+        """
         return tf.train.Feature(
             float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index[0]], dtype="float32"))
         )
 
 
 class RegressionAudioDataset(BaseAudioDataset):
+    """Dataset for regression audio data."""
 
     def analyze_index_outputs(self, outputs: List[List[str]]) -> None:
+        """
+        Analyze the outputs to get the number of target regression values.
+
+        Args:
+            outputs (List[List[str]]): List of target regression values.
+        """
         self.n_ = len(outputs[0])
 
     def output_feature_type(self):
+        """Feature type of RegressionAudioDataset is a float32 FixedLenFeature of shape (n_,)."""
         return tf.io.FixedLenFeature((self.n_,), tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
+        """
+        Load an output feature for the given index.
+
+        Args:
+            output_index (List[str]): List of target regression values.
+
+        Returns:
+            tf.train.Feature: Feature for the given index.
+        """
         return tf.train.Feature(
             float_list=tf.train.FloatList(value=np.array([float(target) for target in output_index], dtype="float32"))
         )
