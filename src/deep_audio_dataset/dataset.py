@@ -1,4 +1,4 @@
-#paritally based on pytorch code by Alexander Corley
+"""Basic Audio Dataset classes."""
 from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import partial
@@ -22,13 +22,23 @@ import tensorflow as tf
 
 
 class BaseAudioDataset(ABC):
-    def __init__(self, directory: str, index_file: str, seed: Optional[Any] = None, metadata_file: Optional[str] = None):
+    """Base class for audio datasets."""
+
+    def __init__(
+            self,
+            directory: str,
+            index_file: str,
+            seed: Optional[Any] = None,
+            metadata_file: Optional[str] = None
+        ) -> None:
         """Initialize the BaseAudioDataset.
 
         Args:
             directory (str): Base directory for the dataset to use.
             index_file (str): Name of the data index file.
             seed (any, optional): Seed to use for the random number generator.
+            metadata_file (str, optional): Name of the file that contains metadata about the dataset.
+                If None, no metadata will be loaded. Defaults to None.
         """
         if seed is None:
             self._rng = random.Random(time.time())
@@ -58,12 +68,15 @@ class BaseAudioDataset(ABC):
     ) -> Tuple[tf.data.Dataset, tf.data.Dataset]:
         """Split the dataset into two disjoint subsets: train set and test set.
 
-        While the split does not have to cover the entire dataset, the sizes cannot be larger than the whole dataset (i.e. this must be true: train_size + test_size <= 0).
+        While the split does not have to cover the entire dataset,
+        the sizes cannot be larger than the whole dataset (i.e. this must be true: train_size + test_size <= 1).
         At least one value, train_size or test_size, must be assigned a value or an exception will be raised.
 
         Args:
-            train_size (float, optional): The fraction of the total dataset to use for training. Either train_size or test_size must be set. Defaults to None.
-            test_size (float, optional): The fraction of the total dataset to use for testing. Either test_size of train_size must be set. Defaults to None.
+            train_size (float, optional): The fraction of the total dataset to use for training.
+                Either train_size or test_size must be set. Defaults to None.
+            test_size (float, optional): The fraction of the total dataset to use for testing.
+                Either test_size of train_size must be set. Defaults to None.
 
         Returns:
             tuple[Dataset, Dataset]: Tuple of (train, test) datasets.
@@ -94,13 +107,15 @@ class BaseAudioDataset(ABC):
         The test set will include all examples that have the same metadata value.
         The train set will include the remainder of the examples.
         No attempts to balance the size of the folds are made, so some training may result in very skewed sizes.
-        The order of the training set is shuffled so that examples with different metadata values are interleaved throughout the dataset.
+        The order of the training set is shuffled so that
+        examples with different metadata values are interleaved throughout the dataset.
 
         Args:
             metadata_field (str): The metadata field to perform cross validation on.
 
         Yields:
-            Iterator[Tuple[tf.train.Feature, tf.train.Feature, str]]: Tuples of (train_set, test_set, fold_value) where fold_value is the current value being held out for the test set.
+            Iterator[Tuple[tf.train.Feature, tf.train.Feature, str]]: Tuples of (train_set, test_set, fold_value)
+                where fold_value is the current value being held out for the test set.
         """
         # create a tfrecord for each fold
         suffix = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -119,15 +134,39 @@ class BaseAudioDataset(ABC):
             yield train_set, test_set, fold
 
     def analyze_index_outputs(self, outputs: List[str]) -> None:
+        """
+        Analyze the outputs of the index file.
+
+        This method is called after the index file is loaded.
+        It can be used to analyze the outputs of the index file and store any relevant information.
+
+        Args:
+            outputs (List[str]): List of output values taken from the index file.
+        """
         return
 
     @abstractmethod
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
-        pass
+        """
+        Using the output index, load the output feature that represents the example.
+
+        Args:
+            output_index (List[str]): List of output values taken from the index file.
+
+        Returns:
+            tf.train.Feature: The output feature that represents the example.
+        """
+        ...
 
     @abstractmethod
-    def output_feature_type(self):
-        pass
+    def output_feature_type(self) -> Any:
+        """
+        Feature type of the output feature.
+
+        Returns:
+            Any: The feature type and configuration of the output feature.
+        """
+        ...
 
     def _load_index(self) -> None:
         num_examples, inputs, outputs = self._parse_index()
@@ -136,7 +175,7 @@ class BaseAudioDataset(ABC):
         self.outputs = outputs
         self.num_examples = num_examples
 
-        results = self._analyze_files([os.path.join(self._dir, "in", input) for input in inputs])
+        results = self._analyze_files([os.path.join(self._dir, "in", input_file) for input_file in inputs])
         self._validate_audio_file_set(results)
         self.input_len = int(list(results["lengths"])[0] * list(results["sampling_rates"])[0])
 
@@ -165,8 +204,7 @@ class BaseAudioDataset(ABC):
             "do_not_exist": [],
         }
 
-        for file in files:
-            file = Path(file)
+        for file in (Path(f) for f in files):
             if file.exists():
                 with open(file, "rb") as f:
                     wav_file = wave.open(f)
@@ -190,10 +228,12 @@ class BaseAudioDataset(ABC):
         """Validate that the analysis results from a set of wav files shows consistent properties.
 
         Args:
-            file_analysis (dict): Dictionary of different properties that were analyzed from some collection of audio files.
+            file_analysis (dict): Dictionary of different properties that were analyzed
+                from some collection of audio files.
 
         Raises:
-            ValueError: If one of the files does not exist or if multiple sampling rates, bits per sample, number of channels, or lengths are detected.
+            ValueError: If one of the files does not exist or if multiple sampling rates,
+                bits per sample, number of channels, or lengths are detected.
         """
         if not file_analysis["all_exist"]:
             raise ValueError(f"The following files do not exist: {', '.join(sorted(file_analysis['do_not_exist']))}")
@@ -210,8 +250,6 @@ class BaseAudioDataset(ABC):
             lengths = ", ".join([str(x) for x in sorted(file_analysis["lengths"])])
             raise ValueError(f"Multiple lengths detected (seconds): {lengths}")
 
-        return
-
     def _load_metadata(self) -> Optional[List[dict]]:
         # check if metadata exists, and if so then load it for the indices
         if self._metadata_file:
@@ -227,7 +265,9 @@ class BaseAudioDataset(ABC):
             for index in metadata:
                 for field, value in metadata[index].items():
                     if not isinstance(value, str):
-                        raise Exception(f"Only string values are allowed in metadata. Found {value} with type {type(value)}")
+                        raise Exception(
+                            f"Only string values are allowed in metadata. Found {value} with type {type(value)}"
+                        )
                     stats["fields"].add(field)
                     if field not in stats["values"]:
                         stats["values"][field] = set()
@@ -263,7 +303,7 @@ class BaseAudioDataset(ABC):
         if num_train_indices + num_test_indices > self.num_examples:
             raise ValueError("Train and test split overlap.")
 
-        shuffled_indices = [i for i in range(self.num_examples)]
+        shuffled_indices = list(range(self.num_examples))
         self._rng.shuffle(shuffled_indices)
 
         train_indices = shuffled_indices[:num_train_indices]
@@ -294,7 +334,7 @@ class BaseAudioDataset(ABC):
             'a_out': self.output_feature_type()
         }
 
-        def _parser(x, key):
+        def _parser(x: tf.train.Example, key: str) -> tf.train.Example:
             result = tf.io.parse_single_example(x, feature_description)
             return result[key]
 
@@ -307,48 +347,98 @@ class BaseAudioDataset(ABC):
     def _get_indices_for_metadata(self, field: str, value: Any) -> List[int]:
         indices = []
         for i in range(self.num_examples):
-            input = self.inputs[i]
-            if self.metadata[input][field] == value:
+            input_file = self.inputs[i]
+            if self.metadata[input_file][field] == value:
                 indices.append(i)
         self._rng.shuffle(indices)
         return indices
 
 
 class AudioDataset(BaseAudioDataset):
+    """Dataset for sequence to sequence audio data."""
 
     def analyze_index_outputs(self, outputs: List[List[str]]) -> None:
-        print(outputs)
+        """
+        Analyze the outputs for each index to ensure they are all the same length and sampling rate.
+
+        Args:
+            outputs (List[str]): List of output file names for each index.
+        """
         results = self._analyze_files([os.path.join(self._dir, "out", output[0]) for output in outputs])
         self.output_len_ = int(list(results["lengths"])[0] * list(results["sampling_rates"])[0])
 
-    def output_feature_type(self):
+    def output_feature_type(self) -> Any:
+        """Feature type of AudioDataset is a float32 FixedLenFeature of shape (output_len_,)."""
         return tf.io.FixedLenFeature((self.output_len_,), tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
+        """
+        Load the output feature for a given index.
+
+        Args:
+            output_index (List[str]): Output file name to load.
+        """
         output_file_path = os.path.join(self._dir, "out", output_index[0])
         return self._load_audio_feature(output_file_path)
 
 
 class MultilabelClassificationAudioDataset(BaseAudioDataset):
+    """Dataset for multilabel classification audio data."""
 
     def analyze_index_outputs(self, outputs: List[List[str]]) -> None:
-        self.label_length = len(outputs[0][0])
-        return
+        """
+        Analyze the outputs for each index to get the label length and ensure they are all the same.
 
-    def output_feature_type(self):
+        Args:
+            outputs (List[List[str]]): List of label classifications.
+        """
+        self.label_length = len(outputs[0][0])
+
+    def output_feature_type(self) -> Any:
+        """Feature type of MultilabelClassificationAudioDataset is a FixedLenFeature of shape (label_length,)."""
         return tf.io.FixedLenFeature([self.label_length], tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
-        return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index[0]], dtype="float32")))
+        """
+        Load an output feature for the given index.
+
+        Args:
+            output_index (List[str]): List of label classifications.
+
+        Returns:
+            tf.train.Feature: Feature for the given index.
+        """
+        return tf.train.Feature(
+            float_list=tf.train.FloatList(value=np.array([float(c) for c in output_index[0]], dtype="float32"))
+        )
 
 
 class RegressionAudioDataset(BaseAudioDataset):
+    """Dataset for regression audio data."""
 
     def analyze_index_outputs(self, outputs: List[List[str]]) -> None:
+        """
+        Analyze the outputs to get the number of target regression values.
+
+        Args:
+            outputs (List[List[str]]): List of target regression values.
+        """
         self.n_ = len(outputs[0])
 
-    def output_feature_type(self):
+    def output_feature_type(self) -> Any:
+        """Feature type of RegressionAudioDataset is a float32 FixedLenFeature of shape (n_,)."""
         return tf.io.FixedLenFeature((self.n_,), tf.float32)
 
     def load_output_feature(self, output_index: List[str]) -> tf.train.Feature:
-        return tf.train.Feature(float_list=tf.train.FloatList(value=np.array([float(target) for target in output_index], dtype="float32")))
+        """
+        Load an output feature for the given index.
+
+        Args:
+            output_index (List[str]): List of target regression values.
+
+        Returns:
+            tf.train.Feature: Feature for the given index.
+        """
+        return tf.train.Feature(
+            float_list=tf.train.FloatList(value=np.array([float(target) for target in output_index], dtype="float32"))
+        )

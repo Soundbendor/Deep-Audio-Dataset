@@ -20,3 +20,37 @@ classifiers = [
 [project.urls]
 "Homepage" = "https://github.com/Soundbendor/Deep-Audio-Dataset"
 "Bug Tracker" = "https://github.com/Soundbendor/Deep-Audio-Dataset/issues"
+
+[tool.ruff]
+select = [
+    'A',
+    'ANN',
+    'B',
+    'C4',
+    'E',
+    'D',
+    'F',
+    'N',
+    'PIE',
+    'PL',
+    'PLE',
+    'PLR',
+    'PLW',
+    'PYI',
+    'RET',
+    'RUF',
+    'S',
+    'SIM',
+    'W'
+]
+line-length = 120
+ignore-init-module-imports = true
+extend-ignore = [
+    'ANN101',  # type annotation on self
+    'ANN401',  # use typing.Any
+    'D203',
+    'D212'
+]
+
+[tool.ruff.pydocstyle]
+convention = "google"
