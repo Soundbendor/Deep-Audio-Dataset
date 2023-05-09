@@ -30,4 +30,4 @@ jobs:
         pip install pytest
     - name: Test with pytest
       run: |
-        pytest tests --cov-report term --cov=dataset
+        pytest tests
