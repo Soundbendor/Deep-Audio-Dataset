@@ -27,6 +27,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install .
+        pip install pytest
     - name: Test with pytest
       run: |
         pytest tests --cov-report term --cov=dataset
