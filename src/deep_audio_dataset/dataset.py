@@ -29,7 +29,8 @@ class BaseAudioDataset(ABC):
             directory: str,
             index_file: str,
             seed: Optional[Any] = None,
-            metadata_file: Optional[str] = None
+            metadata_file: Optional[str] = None,
+            generate_tfrecords: bool = True
         ) -> None:
         """Initialize the BaseAudioDataset.
 
@@ -39,6 +40,9 @@ class BaseAudioDataset(ABC):
             seed (any, optional): Seed to use for the random number generator.
             metadata_file (str, optional): Name of the file that contains metadata about the dataset.
                 If None, no metadata will be loaded. Defaults to None.
+            generate_tfrecords (bool, optional): If True, the tfrecords will be generated in the constructor if
+                they don't already exist. If False then tfrecords will be generated only once they are needed.
+                Defaults to True.
         """
         if seed is None:
             self._rng = random.Random(time.time())
@@ -60,6 +64,9 @@ class BaseAudioDataset(ABC):
 
         self._load_index()
         self._load_metadata()
+
+        if generate_tfrecords:
+            self._ensure_tfrecords_exist()
 
     def train_test_split(
         self,
@@ -92,13 +99,15 @@ class BaseAudioDataset(ABC):
         elif test_size is None:
             test_size = 1.0 - train_size
 
+        self._ensure_tfrecords_exist()
+
         train_indices, test_indices = self._generate_shuffled_indices(train_size, test_size)
 
-        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
-        train_set = self._save_generated_dataset(f"train_{suffix}", train_indices)
-        test_set = self._save_generated_dataset(f"test_{suffix}", test_indices)
+        raw_ds = self._load_raw_ds()
+        train_ds = self._generate_filtered_ds(raw_ds, train_indices)
+        test_ds = self._generate_filtered_ds(raw_ds, test_indices)
 
-        return train_set, test_set
+        return train_ds, test_ds
 
     def kfold_on_metadata(self, metadata_field: str) -> Tuple[tf.train.Feature, tf.train.Feature, str]:
         """Generate a fold based validation on a metadata field.
@@ -329,6 +338,8 @@ class BaseAudioDataset(ABC):
             example = tf.train.Example(features=tf.train.Features(feature=feature))
             writer.write(example.SerializeToString())
 
+        writer.close()
+
         feature_description = {
             'a_in': tf.io.FixedLenFeature((self.input_len,), tf.float32),
             'a_out': self.output_feature_type()
@@ -352,6 +363,63 @@ class BaseAudioDataset(ABC):
                 indices.append(i)
         self._rng.shuffle(indices)
         return indices
+
+    def _ensure_tfrecords_exist(self) -> None:
+        if not os.path.exists(self.tfrecord_path):
+            writer = tf.io.TFRecordWriter(self.tfrecord_path)
+            for index, (input_, output) in enumerate(zip(self.inputs, self.outputs)):
+                feature = {
+                    'index': tf.train.Feature(int64_list=tf.train.Int64List(value=[index])),
+                    'a_in': self._load_audio_feature(os.path.join(self._dir, "in", input_)),
+                    'a_out': self.load_output_feature(output)
+                }
+
+                example = tf.train.Example(features=tf.train.Features(feature=feature))
+                writer.write(example.SerializeToString())
+
+            writer.close()
+
+    def _load_raw_ds(self) -> tf.data.Dataset:
+        feature_description = {
+            'index': tf.io.FixedLenFeature((1,), tf.int64),
+            'a_in': tf.io.FixedLenFeature((self.input_len,), tf.float32),
+            'a_out': self.output_feature_type()
+        }
+
+        def _parser(x: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+            result = tf.io.parse_single_example(x, feature_description)
+            return result['index'], result['a_in'], result['a_out']
+
+        return tf.data.TFRecordDataset(self.tfrecord_path).map(_parser)
+
+    def _generate_filtered_ds(self, raw_ds: tf.data.Dataset, indices: List[int]) -> tf.data.Dataset:
+        def _split(_: tf.Tensor, a_in: tf.Tensor, a_out: tf.Tensor, i: int) -> tf.Tensor:
+            if i == 1:
+                return a_in
+            return a_out
+
+        filtered_ds = self._filter_ds_on_index(raw_ds, indices)
+        in_ds = filtered_ds.map(partial(_split, i=1))
+        out_ds = filtered_ds.map(partial(_split, i=2))
+
+        return tf.data.Dataset.zip((in_ds, out_ds))
+
+    def _filter_ds_on_index(self, ds: tf.data.Dataset, indices: List[int]) -> tf.data.Dataset:
+        truth = [1] * len(indices)
+        lookup = tf.lookup.StaticHashTable(
+            tf.lookup.KeyValueTensorInitializer(keys=indices, values=truth, key_dtype=tf.int64),
+            default_value=0
+        )
+
+        def _filter(index: tf.Tensor, _: tf.Tensor, __: tf.Tensor) -> tf.Tensor:
+            return (lookup.lookup(index) == 1)[0]
+
+        return ds.filter(_filter)
+
+    @property
+    def tfrecord_path(self) -> str:
+        """Path to the tfrecord file."""
+        return os.path.join(self._dir, f"{self._name}.tfrecord")
 
 
 class AudioDataset(BaseAudioDataset):
