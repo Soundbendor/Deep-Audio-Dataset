@@ -1,6 +1,5 @@
 """Basic Audio Dataset classes."""
 from abc import ABC, abstractmethod
-from datetime import datetime
 from functools import partial
 from itertools import chain
 import json
@@ -396,10 +395,7 @@ class BaseAudioDataset(ABC):
             result = tf.io.parse_single_example(x, feature_description)
             return result['index'], result['a_in'], result['a_out']
 
-        if self._shuffle_size is None:
-            shuffle_size = max(int(0.1 * self.num_examples), 1000)
-        else:
-            shuffle_size = self._shuffle_size
+        shuffle_size = max(int(0.1 * self.num_examples), 1000) if self._shuffle_size is None else self._shuffle_size
 
         result = tf.data.TFRecordDataset(self.tfrecord_path)
 
