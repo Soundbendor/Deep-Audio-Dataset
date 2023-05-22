@@ -299,10 +299,6 @@ class BaseAudioDataset(ABC):
         data = tf.squeeze(data)
         return tf.train.Feature(float_list=tf.train.FloatList(value=data.numpy()))
 
-    def _ensure_generated_records_directory(self) -> None:
-        if not os.path.exists(os.path.join(self._dir, "generated_records")):
-            os.mkdir(os.path.join(self._dir, "generated_records"))
-
     def _generate_shuffled_indices(self, train_size: float, test_size: float) -> Tuple[List[int], List[int]]:
         # round uses banker's rounding
         num_train_indices = min(round(self.num_examples * train_size), self.num_examples)
@@ -325,41 +321,6 @@ class BaseAudioDataset(ABC):
         test_indices = shuffled_indices[-num_test_indices:]
 
         return train_indices, test_indices
-
-    def _save_generated_dataset(self, name: str, indices: List[int]) -> tf.data.Dataset:
-        self._ensure_generated_records_directory()
-        writer = tf.io.TFRecordWriter(os.path.join(self._dir, "generated_records", f"{name}.tfrecord"))
-
-        for i in indices:
-            input_file_name = self.inputs[i]
-            output_info = self.outputs[i]
-
-            input_file_path = os.path.join(self._dir, "in", input_file_name)
-
-            feature = {
-                "a_in": self._load_audio_feature(input_file_path),
-                "a_out": self.load_output_feature(output_info)
-            }
-
-            example = tf.train.Example(features=tf.train.Features(feature=feature))
-            writer.write(example.SerializeToString())
-
-        writer.close()
-
-        feature_description = {
-            'a_in': tf.io.FixedLenFeature((self.input_len,), tf.float32),
-            'a_out': self.output_feature_type()
-        }
-
-        def _parser(x: tf.train.Example, key: str) -> tf.train.Example:
-            result = tf.io.parse_single_example(x, feature_description)
-            return result[key]
-
-        raw_ds = tf.data.TFRecordDataset(os.path.join(self._dir, "generated_records", f"{name}.tfrecord"))
-        in_ds = raw_ds.map(partial(_parser, key="a_in"))
-        out_ds = raw_ds.map(partial(_parser, key="a_out"))
-
-        return tf.data.Dataset.zip((in_ds, out_ds))
 
     def _get_indices_for_metadata(self, field: str, value: Any) -> List[int]:
         indices = []
