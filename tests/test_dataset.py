@@ -204,11 +204,9 @@ def test_multilabel_classification_two_samples(tmp_path):
     with open(f"{tmp_path}/test.txt", "w") as f:
         f.write("test0.wav,01\ntest1.wav,10")
 
-
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
     dataset._ensure_tfrecords_exist()
-    actual_results = [(x, y) for x, y in dataset.all().as_numpy_iterator()]
-    actual_results = sorted(actual_results, key=lambda x: x[0][0])
+    actual_results = sorted(dataset.all().as_numpy_iterator(), key=lambda x: x[1][0])
 
     assert len(actual_results) == 2
     assert all(actual_results[0][1] == [0.0, 1.0])
