@@ -74,10 +74,14 @@ class BaseAudioDataset(ABC):
         if generate_tfrecords:
             self._ensure_tfrecords_exist()
 
-    def all(self) -> tf.data.Dataset:
+    def all(self) -> tf.data.Dataset:  # noqa: A003
+        """Return the entire dataset as a tf.data.Dataset.
+
+        Returns:
+            Dataset: The entire dataset.
+        """
         raw_ds = self._load_raw_ds()
-        filtered_ds = self._generate_filtered_ds(raw_ds, list(range(self.num_examples)))
-        return filtered_ds
+        return self._generate_filtered_ds(raw_ds, list(range(self.num_examples)))
 
     def train_test_split(
         self,
