@@ -397,7 +397,7 @@ class BaseAudioDataset(ABC):
 
         shuffle_size = max(int(0.1 * self.num_examples), 1000) if self._shuffle_size is None else self._shuffle_size
 
-        result = tf.data.TFRecordDataset(self.tfrecord_path)
+        result = tf.data.TFRecordDataset(self.tfrecord_path).map(_parser)
 
         if shuffle_size:
             result = result.shuffle(
@@ -405,7 +405,7 @@ class BaseAudioDataset(ABC):
                 reshuffle_each_iteration=False  # this must be false, otherwise the X and y sets will not stay coupled
             )
 
-        return result.map(_parser)
+        return result
 
     def _generate_filtered_ds(self, raw_ds: tf.data.Dataset, indices: List[int]) -> tf.data.Dataset:
         def _split(_: tf.Tensor, a_in: tf.Tensor, a_out: tf.Tensor, i: int) -> tf.Tensor:
