@@ -49,7 +49,8 @@ extend-ignore = [
     'ANN101',  # type annotation on self
     'ANN401',  # use typing.Any
     'D203',
-    'D212'
+    'D212',
+    'PLR0913',  # function argument count restriction
 ]
 
 [tool.ruff.pydocstyle]
