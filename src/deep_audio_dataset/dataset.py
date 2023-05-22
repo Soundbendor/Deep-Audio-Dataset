@@ -367,10 +367,10 @@ class BaseAudioDataset(ABC):
     def _ensure_tfrecords_exist(self) -> None:
         if not os.path.exists(self.tfrecord_path):
             writer = tf.io.TFRecordWriter(self.tfrecord_path)
-            for index, (input, output) in enumerate(zip(self.inputs, self.outputs)):
+            for index, (input_, output) in enumerate(zip(self.inputs, self.outputs)):
                 feature = {
                     'index': tf.train.Feature(int64_list=tf.train.Int64List(value=[index])),
-                    'a_in': self._load_audio_feature(os.path.join(self._dir, "in", input)),
+                    'a_in': self._load_audio_feature(os.path.join(self._dir, "in", input_)),
                     'a_out': self.load_output_feature(output)
                 }
 
@@ -386,18 +386,17 @@ class BaseAudioDataset(ABC):
             'a_out': self.output_feature_type()
         }
 
-        def _parser(x):
+        def _parser(x: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
             result = tf.io.parse_single_example(x, feature_description)
             return result['index'], result['a_in'], result['a_out']
 
         return tf.data.TFRecordDataset(self.tfrecord_path).map(_parser)
 
-    def _generate_filtered_ds(self, raw_ds, indices) -> tf.data.Dataset:
-        def _split(_, a_in, a_out, i):
+    def _generate_filtered_ds(self, raw_ds: tf.data.Dataset, indices: List[int]) -> tf.data.Dataset:
+        def _split(_: tf.Tensor, a_in: tf.Tensor, a_out: tf.Tensor, i: int) -> tf.Tensor:
             if i == 1:
                 return a_in
-            else:
-                return a_out
+            return a_out
 
         filtered_ds = self._filter_ds_on_index(raw_ds, indices)
         in_ds = filtered_ds.map(partial(_split, i=1))
@@ -405,11 +404,14 @@ class BaseAudioDataset(ABC):
 
         return tf.data.Dataset.zip((in_ds, out_ds))
 
-    def _filter_ds_on_index(self, ds, indices):
+    def _filter_ds_on_index(self, ds: tf.data.Dataset, indices: List[int]) -> tf.data.Dataset:
         truth = [1] * len(indices)
-        lookup = tf.lookup.StaticHashTable(tf.lookup.KeyValueTensorInitializer(keys=indices, values=truth, key_dtype=tf.int64), default_value=0)
+        lookup = tf.lookup.StaticHashTable(
+            tf.lookup.KeyValueTensorInitializer(keys=indices, values=truth, key_dtype=tf.int64),
+            default_value=0
+        )
 
-        def _filter(index, _, __):
+        def _filter(index: tf.Tensor, _: tf.Tensor, __: tf.Tensor) -> tf.Tensor:
             return (lookup.lookup(index) == 1)[0]
 
         return ds.filter(_filter)
