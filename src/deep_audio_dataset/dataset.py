@@ -109,15 +109,6 @@ class BaseAudioDataset(ABC):
 
         return train_ds, test_ds
 
-    def _filter_ds_on_index(self, ds, indices):
-        truth = [1] * len(indices)
-        lookup = tf.lookup.StaticHashTable(tf.lookup.KeyValueTensorInitializer(keys=indices, values=truth, key_dtype=tf.int64), default_value=0)
-
-        def _filter(index, a_in, a_out):
-            return (lookup.lookup(index) == 1)[0]
-
-        return ds.filter(_filter)
-
     def kfold_on_metadata(self, metadata_field: str) -> Tuple[tf.train.Feature, tf.train.Feature, str]:
         """Generate a fold based validation on a metadata field.
 
@@ -402,7 +393,7 @@ class BaseAudioDataset(ABC):
         return tf.data.TFRecordDataset(self.tfrecord_path).map(_parser)
 
     def _generate_filtered_ds(self, raw_ds, indices) -> tf.data.Dataset:
-        def _split(index, a_in, a_out, i):
+        def _split(_, a_in, a_out, i):
             if i == 1:
                 return a_in
             else:
@@ -413,6 +404,15 @@ class BaseAudioDataset(ABC):
         out_ds = filtered_ds.map(partial(_split, i=2))
 
         return tf.data.Dataset.zip((in_ds, out_ds))
+
+    def _filter_ds_on_index(self, ds, indices):
+        truth = [1] * len(indices)
+        lookup = tf.lookup.StaticHashTable(tf.lookup.KeyValueTensorInitializer(keys=indices, values=truth, key_dtype=tf.int64), default_value=0)
+
+        def _filter(index, _, __):
+            return (lookup.lookup(index) == 1)[0]
+
+        return ds.filter(_filter)
 
     @property
     def tfrecord_path(self) -> str:
