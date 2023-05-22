@@ -31,8 +31,8 @@ def test_audio_dataset_generate(two_wav_files):
     base_path = two_wav_files[1]
     ad = AudioDataset(f"{base_path}/test_data", "test.txt")
 
-    ad._ensure_generated_records_directory()
-    ds = ad._save_generated_dataset("test", [i for i in range(2)])
+    ad._ensure_tfrecords_exist()
+    ds = ad.all()
 
     for x, y in ds.as_numpy_iterator():
         assert len(x) == 441000
@@ -164,8 +164,8 @@ def test_multilabel_classification(tmp_path):
 
 
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
-    dataset._ensure_generated_records_directory()
-    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(1)]).as_numpy_iterator()]
+    dataset._ensure_tfrecords_exist()
+    actual_results = [(x, y) for x, y in dataset.all().as_numpy_iterator()]
 
     assert len(actual_results) == 1
     assert list(actual_results[0][1]) == [1.0]
@@ -183,8 +183,8 @@ def test_multilabel_classification_two_labels(tmp_path):
 
 
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
-    dataset._ensure_generated_records_directory()
-    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(1)]).as_numpy_iterator()]
+    dataset._ensure_tfrecords_exist()
+    actual_results = [(x, y) for x, y in dataset.all().as_numpy_iterator()]
 
     assert len(actual_results) == 1
     assert all(actual_results[0][1] == [0.0, 1.0])
@@ -204,11 +204,9 @@ def test_multilabel_classification_two_samples(tmp_path):
     with open(f"{tmp_path}/test.txt", "w") as f:
         f.write("test0.wav,01\ntest1.wav,10")
 
-
     dataset = MultilabelClassificationAudioDataset(tmp_path, "test.txt")
-    dataset._ensure_generated_records_directory()
-    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(2)]).as_numpy_iterator()]
-    actual_results = sorted(actual_results, key=lambda x: x[0][0])
+    dataset._ensure_tfrecords_exist()
+    actual_results = sorted(dataset.all().as_numpy_iterator(), key=lambda x: x[1][0])
 
     assert len(actual_results) == 2
     assert all(actual_results[0][1] == [0.0, 1.0])
@@ -295,7 +293,7 @@ def test_regression_dataset(tmp_path):
     dataset = RegressionAudioDataset(tmp_path, "test.txt")
     assert dataset.n_ == 2
 
-    actual_results = [(x, y) for x, y in dataset._save_generated_dataset("test", [i for i in range(1)]).as_numpy_iterator()]
+    actual_results = [(x, y) for x, y in dataset.all().as_numpy_iterator()]
 
     assert len(actual_results) == 1
     assert all(actual_results[0][1] == [1.0, 0.0])

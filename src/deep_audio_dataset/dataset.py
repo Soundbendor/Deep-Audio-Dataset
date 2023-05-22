@@ -1,7 +1,7 @@
 """Basic Audio Dataset classes."""
 from abc import ABC, abstractmethod
-from datetime import datetime
 from functools import partial
+from itertools import chain
 import json
 import os
 from pathlib import Path
@@ -30,7 +30,8 @@ class BaseAudioDataset(ABC):
             index_file: str,
             seed: Optional[Any] = None,
             metadata_file: Optional[str] = None,
-            generate_tfrecords: bool = True
+            generate_tfrecords: bool = True,
+            shuffle_size: Optional[int] = None
         ) -> None:
         """Initialize the BaseAudioDataset.
 
@@ -43,6 +44,10 @@ class BaseAudioDataset(ABC):
             generate_tfrecords (bool, optional): If True, the tfrecords will be generated in the constructor if
                 they don't already exist. If False then tfrecords will be generated only once they are needed.
                 Defaults to True.
+            shuffle_size (int, optional): Size of the shuffle buffer to use when shuffling the dataset.
+                If None, 10% or 1000 elements will be used (whichever is larger).
+                If 0, no shuffling will be done.
+                Defaults to None.
         """
         if seed is None:
             self._rng = random.Random(time.time())
@@ -52,6 +57,7 @@ class BaseAudioDataset(ABC):
         #store args as class members
         self._dir = directory
         self._name = index_file
+        self._shuffle_size = shuffle_size
 
         self._metadata_file = metadata_file
         self.metadata = None
@@ -67,6 +73,15 @@ class BaseAudioDataset(ABC):
 
         if generate_tfrecords:
             self._ensure_tfrecords_exist()
+
+    def all(self) -> tf.data.Dataset:  # noqa: A003
+        """Return the entire dataset as a tf.data.Dataset.
+
+        Returns:
+            Dataset: The entire dataset.
+        """
+        raw_ds = self._load_raw_ds()
+        return self._generate_filtered_ds(raw_ds, list(range(self.num_examples)))
 
     def train_test_split(
         self,
@@ -126,21 +141,21 @@ class BaseAudioDataset(ABC):
             Iterator[Tuple[tf.train.Feature, tf.train.Feature, str]]: Tuples of (train_set, test_set, fold_value)
                 where fold_value is the current value being held out for the test set.
         """
-        # create a tfrecord for each fold
-        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        self._ensure_tfrecords_exist()
+
+        raw_ds = self._load_raw_ds()
+
         folds = {
-            fold: self._save_generated_dataset(
-                f"{suffix}_{fold}.tfrecord",
-                self._get_indices_for_metadata(metadata_field, fold)
-            ) for fold in self.metadata_stats["values"][metadata_field]
+            fold: self._get_indices_for_metadata(metadata_field, fold)
+            for fold in self.metadata_stats["values"][metadata_field]
         }
 
         for fold in self.metadata_stats["values"][metadata_field]:
-            test_set = folds[fold]
-            train_set = tf.data.Dataset.sample_from_datasets([
-                v for k, v in folds.items() if k != fold
-            ])
-            yield train_set, test_set, fold
+            test_indices = folds[fold]
+            train_indices = list(chain(*[v for k, v in folds.items() if k != fold]))
+            train_ds = self._generate_filtered_ds(raw_ds, train_indices)
+            test_ds = self._generate_filtered_ds(raw_ds, test_indices)
+            yield train_ds, test_ds, fold
 
     def analyze_index_outputs(self, outputs: List[str]) -> None:
         """
@@ -293,10 +308,6 @@ class BaseAudioDataset(ABC):
         data = tf.squeeze(data)
         return tf.train.Feature(float_list=tf.train.FloatList(value=data.numpy()))
 
-    def _ensure_generated_records_directory(self) -> None:
-        if not os.path.exists(os.path.join(self._dir, "generated_records")):
-            os.mkdir(os.path.join(self._dir, "generated_records"))
-
     def _generate_shuffled_indices(self, train_size: float, test_size: float) -> Tuple[List[int], List[int]]:
         # round uses banker's rounding
         num_train_indices = min(round(self.num_examples * train_size), self.num_examples)
@@ -320,48 +331,12 @@ class BaseAudioDataset(ABC):
 
         return train_indices, test_indices
 
-    def _save_generated_dataset(self, name: str, indices: List[int]) -> tf.data.Dataset:
-        self._ensure_generated_records_directory()
-        writer = tf.io.TFRecordWriter(os.path.join(self._dir, "generated_records", f"{name}.tfrecord"))
-
-        for i in indices:
-            input_file_name = self.inputs[i]
-            output_info = self.outputs[i]
-
-            input_file_path = os.path.join(self._dir, "in", input_file_name)
-
-            feature = {
-                "a_in": self._load_audio_feature(input_file_path),
-                "a_out": self.load_output_feature(output_info)
-            }
-
-            example = tf.train.Example(features=tf.train.Features(feature=feature))
-            writer.write(example.SerializeToString())
-
-        writer.close()
-
-        feature_description = {
-            'a_in': tf.io.FixedLenFeature((self.input_len,), tf.float32),
-            'a_out': self.output_feature_type()
-        }
-
-        def _parser(x: tf.train.Example, key: str) -> tf.train.Example:
-            result = tf.io.parse_single_example(x, feature_description)
-            return result[key]
-
-        raw_ds = tf.data.TFRecordDataset(os.path.join(self._dir, "generated_records", f"{name}.tfrecord"))
-        in_ds = raw_ds.map(partial(_parser, key="a_in"))
-        out_ds = raw_ds.map(partial(_parser, key="a_out"))
-
-        return tf.data.Dataset.zip((in_ds, out_ds))
-
     def _get_indices_for_metadata(self, field: str, value: Any) -> List[int]:
         indices = []
         for i in range(self.num_examples):
             input_file = self.inputs[i]
             if self.metadata[input_file][field] == value:
                 indices.append(i)
-        self._rng.shuffle(indices)
         return indices
 
     def _ensure_tfrecords_exist(self) -> None:
@@ -390,7 +365,17 @@ class BaseAudioDataset(ABC):
             result = tf.io.parse_single_example(x, feature_description)
             return result['index'], result['a_in'], result['a_out']
 
-        return tf.data.TFRecordDataset(self.tfrecord_path).map(_parser)
+        shuffle_size = max(int(0.1 * self.num_examples), 1000) if self._shuffle_size is None else self._shuffle_size
+
+        result = tf.data.TFRecordDataset(self.tfrecord_path).map(_parser)
+
+        if shuffle_size:
+            result = result.shuffle(
+                shuffle_size,
+                reshuffle_each_iteration=False  # this must be false, otherwise the X and y sets will not stay coupled
+            )
+
+        return result
 
     def _generate_filtered_ds(self, raw_ds: tf.data.Dataset, indices: List[int]) -> tf.data.Dataset:
         def _split(_: tf.Tensor, a_in: tf.Tensor, a_out: tf.Tensor, i: int) -> tf.Tensor:
