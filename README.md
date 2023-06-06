@@ -56,8 +56,7 @@ Here is an example metadata file:
     "audio1.wav": {
         "artist": "Artist 1",
         "genre": "GenreA"
-    },
-    ...
+    }
 }
 ```
 
@@ -66,7 +65,7 @@ There is no restriction on what kind of metadata fields are used or what the val
 #### Data Consistency
 
 The base implementation of DAD reviews the input audio files and ensures they are consistent across multiple axis.
-Some of things it considers are: sample rate, bit rate, number of channels, length, etc.
+Some of the things it considers are: sample rate, bit rate, number of channels, length, etc.
 If inconsistent data is found then a `ValueError` is raised and the user is notified.
 
 #### Process
