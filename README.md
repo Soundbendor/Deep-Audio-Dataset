@@ -1,109 +1,234 @@
 # Audio Dataset
-### A dataset for loading in audio file pairs for Tensorflow 2.0
+### Overview
 
-#### Requirements
+Deep Audio Dataset (DAD) is a library that helps with the loading of audio related data for deep learning experiments.
+DAD currently supports sequence-to-sequence (audio file pairs), regression targets, and multilabeling type experiments.
+Traditional train-test splitting as well as k-fold cross validation on metadata are also supported.
+
+### Requirements
 * Python 3
 * Tensorflow 2.2+
 * Numpy
-* Sox (the program, and python package 'pip install pysox')
 
-#### Example usage
+### General Notes
 
-Import packages and set up hyperparams
+#### Directory Structure
 
+DAD expects a specific directory structure to be available for all types of experiments:
+```
+root
+ |---- in
+ |      |- <wav file 1>
+ |      |- <wav file 2>
+ |      ...
+ |      |- <wav file n>
+ |
+ |---- <index file>
+ |---- <metadata file>
+```
+
+Note that the index file, metadata file, and the individual wav files can have any name.
+However, the `in` directory must be called that.
+
+#### Index File
+
+The index file is the way that DAD can interact with your data.
+Index files are essentially headless csv files with the following structure:
+```
+<input file name>,<target 1>,...,<target n>
+```
+
+Each type of experiment has a specific requirement for what the targets in an index file should look like.
+However, every experiment type currently expects the input file name to be the first column.
+
+#### Metadata File
+
+The metadata file is a JSON file that contains the associated metadata entries for each of the input files.
+The top level structure is an object with a key for each of the input files.
+The values for those keys are another object with metadata fields and their values.
+Here is an example metadata file:
+```json
+{
+    "audio0.wav": {
+        "artist": "Artist 0",
+        "genre": "GenreA"
+    },
+    "audio1.wav": {
+        "artist": "Artist 1",
+        "genre": "GenreA"
+    }
+}
+```
+
+There is no restriction on what kind of metadata fields are used or what the values are.
+
+#### Data Consistency
+
+The base implementation of DAD reviews the input audio files and ensures they are consistent across multiple axis.
+Some of the things it considers are: sample rate, bit rate, number of channels, length, etc.
+If inconsistent data is found then a `ValueError` is raised and the user is notified.
+
+#### Process
+
+DAD currently utilizes monolithic tfrecord files (protobuffer files) to store examples and streams data from them.
+By monolithic, we mean that the entire underlying dataset is stored inside of a single tfrecord file.
+Once this file is generated it will not need to be generated again.
+Note that it can take a significant amount of time to generate the tfrecord file.
+
+Currently, by default, the tfrecord file is generated inside of the dataset object's constructor.
+This can be bypassed, however the file will be generated on the next call to `train_test_split` or `kfold_on_metadata`.
+
+A specific naming scheme is used: `{index_file}.tfrecord`.
+So, given an index file called `index.txt` then the tfrecord file would be called `index.txt.tfrecord`.
+If that file already exists then DAD assumes it is valid and will use it.
+
+Warning: this can cause issues if you have an obsolete tfrecord in the directory. DAD has no way of detecting this type of issue at this point.
+
+With TensorFlow, DAD utilizes a `StaticHashTable` structure to filter records for splits and kfolds.
+DAD generates a list of record indices (which align with the row number in the index file) that should be include in a particular set (train or test).
+These indices are loaded into a table which is then used to filter the records as they are read in from storage.
+
+### Example Usage
+
+#### Sequence-to-Sequence
+
+Uses the `AudioDataset` class.
+Index file format:
+```
+<input wav file 1>,<target wav file 1>
+<input wav file 2>,<target wav file 2>
+...
+<input wav file n>,<target wave file n>
+```
+
+Example index file:
+```
+input_file_0.wav,output_file_A.wav
+input_file_1.wav,output_file_B.wav
+...
+```
+
+Note: There must be a directory called `out` and that is where the target wave files must be located.
+
+#### Regression
+
+Uses the `RegressionAudioDataset` class.
+Index file format:
+```
+<input wav file 1>,<target value 1.1>,<target value 1.2>,...,<target value 1.m>
+<input wav file 2>,<target value 2.1>,<target value 2.2>,...,<target value 2.m>
+...
+<input wav file n>,<target value n.1>,<target value n.2>,...,<target value n.m>
+```
+
+Example index file:
+```
+input_file_0.wav,0.123,0.456
+input_file_1.wav,0.789,0.012
+...
+```
+
+Note: There can be any number of target values per example but the number of values must be consistent across all examples.
+
+#### Multilabel Classification
+
+Uses the `MultiLabelClassificationAudioDataset` class.
+Index file format:
+```
+<input wav file 1>,<label bit mask 1>
+<input wav file 2>,<label bit mask 2>
+...
+<input wav file n>,<label bit mask 3>
+```
+
+Example index file:
+```
+input_file_0.wav,001001
+input_file_1.wav,001000
+```
+
+#### Train-Test Split
+
+Train-test splits are generated by calling the appropriate method on the dataset object:
 ```python
-from dataset import AudioDataset
+from deep_audio_dataset import AudioDataset
 
-#hyperparams
-input_size=256                                  #used for data loading
-input_length = 16000*1                          #sample rate * length (sec), used for data loading
-batch_size=64                                   #used for data loading
+base_directory = "data_directory"
+index_file_name = "index.txt"
 
-#dataset params
-dataset_directory = "./data"
-dataset_name = "dataset"
-input_lower = 100                               #lowest frequency for dataset generation
-input_upper = 1000                              #highest frequency for dataset generation
-n_steps = 1000                                  #used for dataset generation
-waves = ["sin", "square", "saw", "triangle"]    #types of waveforms used for dataset generation
-dataset_size = len(waves)*n_steps               #total size of dataset, used for loading dataset
-audio_length = 1                                #length of audio in seconds (used for dataset generation)
+dataset = AudioDataset(
+    base_directory,
+    index_file_name,
+)
+
+train, test = dataset.train_test_split(test_size=0.2)
 ```
 
-Create dataset object and generate data
-
+The return objects are zipped datasets that can be passed directly into models for fitting and validating:
 ```python
-if __name__ == "__main__":
-    dataset = AudioDataset(dataset_directory, dataset_name)
-
-    #Generate dataset if it doesn't already exist
-    dataset.generate(input_lower, input_upper, n_steps)
-
-    #Load the dataset so we can use them
-    dataset.load(input_size, input_length, train_split=0.7, val_split=0.15, test_split=0.15)
+model.fit(
+    train.batch(10),
+    batch_size=10,
+    epochs=10,
+    validation_data=test.batch(10)
+)
 ```
 
-Various parameters can be accessed as class members
+#### K-Fold on Metadata
 
+Performing a k-fold cross validation on metadata is fairly straightforward.
+First, instantiate the data object and make sure to include the name of the metadata file:
 ```python
-#Access dataset as members of the class
-dataset.train
-dataset.validate
-dataset.test
+from deep_audio_dataset import AudioDataset
 
-#Acces the number of steps per epoch for each dataset
-dataset.train_steps
-dataset.val_steps
-dataset.test_steps
+base_directory = "data_directory"
+index_file_name = "index.txt"
+metadata_file_name = "metadata.txt"
+
+dataset = AudioDataset(
+    base_directory,
+    index_file_name,
+    metadata_file=metadata_file_name
+)
 ```
 
-Example of training and testing with this API
-
+You can then call the `kfold_on_metadata` method and pass to it the name of the metadata field you want to generate folds on.
+The method returns an iterator that can be iterated on in any normal way:
 ```python
-model = tf.keras.Sequential()
-#Define model here
-
-model.fit(dataset.train, validation_data=dataset.validate, validation_steps=dataset.val_steps, epochs=epochs, steps_per_epoch=dataset.train_steps)
-model.evaluate(dataset.test, steps=dataset.test_steps)
+for train, test, metavalue in dataset.kfold_on_metadata("artist"):
+    ...
 ```
 
-#### Automatic dataset generation, and using custom datasets
-When `dataset.generate()` is called, it does two things. First, it will generate `dataset_size` wav files using sox, as well a csv file used later in dataset generation. These files will range in frequency from `input_lower` to `input_upper` for the input to the network (X), and `dialation*input_lower` to `dialation*input_upper` for the target of the network (Y). For each wave type in `waves`, there will be `n_steps` wav files generated. These are generated with an exponential separation in frequency in order to have the dataset distribution better mirror human psychoacoustics. All audio files are generated at 16bit precision at 16kHz.
+The triplets returned include a train set, test set, and metadata value.
+The metadata value is the current holdout value for the iteration.
+So, all of the examples in the train set do not have the holdout value in their metadata.
+While all of the examples in the test set do have that holdout value.
+Be warned, there are no attempts made to balance the folds so some iterations can have very unbalanced train/test sets.
 
-After the wav files are generated, the program generates tfrecord files to be used with the Tensorflow 2 Dataset API. Essentially, it takes the hundreds/thousands of wav files and packages them together into bigger (~150MB) files that work well with Tensorflow. These files are then what is used to load the dataset. After the tfrecord files are generated, the original wav files can be removed using the argument `remove_wav=True`.
+### Process of Extension
 
-If you want to use this API with your own audio files, you must first generate tfrecords. Create a directory for your data and a name for your dataset, and set these as the first two arguments in `AudioDataset("./data", "dataset" ...)`. In `./data` (or your directory name), create two folders, `./data/in` and `./data/out`. In the `in` directory, place all of the data you want to input into the network (the X), and in `out` place all the data you want the network to predict (the Y). Then, to tell the program what input goes with what output (X, Y) pair, create a csv file `./data/dataset` with no extension. In this file, list the file names of the (X, Y) pairs, separated by a comma, with new pairs on new lines.
-```
-sin5000_00.wav,sin10000_00.wav
-sin4980_48.wav,sin9960_96.wav
-sin4961_03.wav,sin9922_06.wav
-```
-Then, call `dataset.generate_records(ex_per_file=ex_per_file, n_processes=n_processes)`. Default arguments should work. `n_processes` is how many processes should it run simultaneously to create the tfrecord files faster. Default is the number of availible CPU cores. `ex_per_file` allows you to control how many (X, Y) pairs there should be per tfrecord file. This number should be set so the files are between 150 and 200 MB. Default of 2400 should equate to this if your audio is 16 bit, 16kHz, and 1 sec in length. ( (n_bit/8) * n_samples * 2 * ex_per_file).
+DAD is meant to be extended with new types of experiments/datasets for TensorFlow.
+Currently, the easiest extension that can be supported are datasets that have audio data input.
+To support a new kind of the dataset you must extend the `BaseAudioDataset` abstract class.
+This will require that you implement the following abstract methods:
+* `LoadOutputFeature(output_index: List[str]) -> tf.train.Feature`: This method takes in a list of target information and returns a TensorFlow Feature that represents a single target example. The list of strings are the target values from the index file for the row you are generating a feature for. The target values have been split on commas (i.e. `target_string.split(",")`).
+* `OutputFeatureType() -> Any`: This method must return the feature type that `LoadOuputFeature` will return. This is used to populate a schema. An example of a feature type is `tf.io.FixedLenFeature`.
 
+Optionally, you can override the `analyze_index_outputs` method as well. This method is passed a list of lists of strings. Each element of the list is a target value that has been split by commas. This method can be helpful in deciding what `OutputFeatureType` should return as well as a chance to validate the target data for consistency.
 
-#### Audio Classification Datasets
-Often, you don't need audio input and audio output. I have provided two dataset classes to handle tasks in which you take audio as an input, and predict discrete labels as an output. `SimpleAudioClassificationDataset` allows you to predict classes based off the entire audio file. This may be useful in genre classification for example. In the dataset file (`./data/dataset`) you would list the audio file first, and then the applicable classes in csv format. The corresponding audio files would still be placed in `./data/in/`. For instance, with four potential output classes:
-```
-audio1.wav,0,0,0,1
-audio2.wav,1,0,1,0
-audio3.wav,0,1,0,0
-```
+All three of the currently implemented dataset classes follow this pattern and they make decent examples.
 
-If you have a more complicated classification problem, there is `AudioClassificationDataset`. This allows you to provide a csv file associated with each input audio file which allows you to correlate classes with small chunks of audio. This is useful for trying to predict MIDI notes from an input song. To create a dataset using this class, structure your dataset file like this:
-```
-song1.wav,song1_key.csv
-song2.wav,song2_key.csv
-song3.wav,song3_key.csv
-```
-Where each csv files is structured like this:
-```
-TIME STAMP, FEATURE 1, ... , FEATURE N
-0,0,...,0
-1,1,...,0
-2,0,...,1
-```
+### DevOps
 
-#### Things to note
-* Code using dataset generation must be wrapped in a `if __name__ == "__main__"` block due to the use of multithreading.
-* To prevent GPU OOM errors, the GPU is disabled when generating tfrecord files. Make sure you enable GPU usage after calls that would generate tfrecord files (or run the program a second time after records are generated).
-* If `dataset.test_steps` or `dataset.val_steps` is less than `batch_size`, there may be a runtime error upon validation/evaluation. Increasing the amount of data in the network or increasing the train/val split size is a remedy.
+The repository on github currently has a test suite and linter action that run on each push to a PR as well as push to `main`.
+The test suite is managed using the `pytest` library.
+For linter, DAD is currently using `ruff`.
+`ruff` is still in early development as of this writing but it was found to be far more performant than `flake8`.
+All of the settings for `ruff` are managed in the `pyproject.toml` file.
+There are no autoformatters currently in use on this project.
+
+A wheel building action is executed on every push to `main` (this also triggers on PR merges).
+The built wheel is published as an artifact and available for download from the successful run.
+
+Dependencies are currently managed through a `requirements.txt` file.
+This should be moved to the `pyproject.toml` file at some point in the future.
